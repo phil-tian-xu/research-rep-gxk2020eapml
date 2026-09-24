@@ -1,3 +1,18 @@
+/materials/
+# Credentials and local environment settings
+.env
+.env.*
+!.env.example
+.pgpass
+*.pem
+*.key
+
+# Generated files
+*.log
+slurm-*.out
+.ipynb_checkpoints/
+
+.obsidian/
 *.egg-info/
 
 data/*
@@ -5,8 +20,6 @@ data/*
 
 results/*
 !results/__init__.py
-
-uv.lock
 
 /.venv
 /.pytest_cache

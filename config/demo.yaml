@@ -1,0 +1,10 @@
+GENERAL:
+  NAME: "demo"
+  TASK_TYPE: "market_data_update"
+
+INSTRUMENTS:
+  TASK_UNIVERSE_FILE: "default"
+
+DATA:
+  SOURCE:
+    NAME: "lseg"

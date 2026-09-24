@@ -1,0 +1,35 @@
+# Milestone 1: validate the real-data prediction workflow.
+# Component grid and preprocessing choices are development settings,
+# not claims about the authors' exact empirical specification.
+
+GENERAL:
+  NAME: "gkx_pls_workflow_v1"
+  TASK_TYPE: "run"
+
+DATA:
+  DATASET: "gkx_dev_p05_seed2020"
+
+RUN:
+  SPLIT:
+    FIRST_TRAIN_YEAR: 1957
+    FIRST_TEST_YEAR: 1987
+    LAST_TEST_YEAR: 1988
+    VALIDATION_YEARS: 12
+
+  MODELS:
+    ENABLED: ["PLS"]
+    FIT_INTERCEPT: true
+    STANDARDIZE: false
+    PLS:
+      COMPONENT_GRID: [1, 2, 3]
+      TOL: 1.0e-12
+
+  EVALUATION:
+    VALIDATION:
+      NAME: "mse"
+      DELTA: null
+    TEST:
+      NAME: "mse"
+      DELTA: null
+
+  OUTPUT_DIR: "results/gkx_pls_workflow_v1"

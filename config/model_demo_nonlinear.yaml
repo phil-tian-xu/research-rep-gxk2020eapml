@@ -1,0 +1,5 @@
+_BASE_: "model_demo.yaml"
+GENERAL:
+  NAME: "model_demo_nonlinear"
+DATA:
+  DATASET: "synthetic_nonlinear_v1"

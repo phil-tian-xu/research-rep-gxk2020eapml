@@ -1,0 +1,43 @@
+# Milestone 2 pilot: Table 1 All row and Figure 3 PCR/PLS complexity.
+# User-approved grids/sample/K=0 convention; not recovered author grids.
+# Huber quantile level: appendix Table A.5. Absolute training OLS residuals
+# and annual recomputation: explicit user-approved interpretation.
+GENERAL:
+  NAME: "gkx_table1_figure3_v1"
+  TASK_TYPE: "run"
+
+DATA:
+  DATASET: "gkx_dev_p05_seed2020"
+
+RUN:
+  SPLIT:
+    FIRST_TRAIN_YEAR: 1957
+    FIRST_TEST_YEAR: 1987
+    LAST_TEST_YEAR: 2016
+    VALIDATION_YEARS: 12
+  MODELS:
+    ENABLED: ["PCR", "PLS", "OLS_HUBER"]
+    FIT_INTERCEPT: true
+    STANDARDIZE: false
+    LINEAR_SOLVER:
+      MAX_ITER: 5000
+      TOL: 1.0e-8
+      INITIAL_STEP: 1.0
+    OLS_HUBER:
+      HUBER_DELTA: null
+      HUBER_QUANTILE: 0.999
+      SOLVER: "svd_apg"
+    PCR:
+      COMPONENT_GRID: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100]
+    PLS:
+      COMPONENT_GRID: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      TOL: 1.0e-12
+  EVALUATION:
+    VALIDATION:
+      NAME: "mse"
+      DELTA: null
+    TEST:
+      NAME: "mse"
+      DELTA: null
+  REPORT_TABLE1_FIGURE3: true
+  OUTPUT_DIR: "results/gkx_table1_figure3_v1"

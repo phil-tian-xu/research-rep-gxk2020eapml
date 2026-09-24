@@ -1,0 +1,23 @@
+# Synthetic dataset config for the shared main.py entry point. These grids/thresholds are illustrative,
+# not claims about the authors' empirical implementation.
+GENERAL:
+  NAME: "model_demo"
+  TASK_TYPE: "run"
+
+DATA:
+  DATASET: "synthetic_linear_v1"
+
+RUN:
+  SPLIT:
+    LAST_TEST_YEAR: 1988
+  MODELS:
+    ENABLED: ["OLS", "OLS_HUBER", "ENET_HUBER", "PCR", "PLS"]
+    OLS_HUBER:
+      HUBER_DELTA: 0.1
+    ENET_HUBER:
+      HUBER_DELTA: 0.1
+      PENALTY_GRID: [0.001, 0.01]
+    PCR:
+      COMPONENT_GRID: [2, 4]
+    PLS:
+      COMPONENT_GRID: [2, 4]

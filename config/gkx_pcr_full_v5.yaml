@@ -1,0 +1,10 @@
+# Full-universe PCR, complete annual arrays and the original dense SVD.
+# K=0..100 is the agreed replication grid, not a verified author grid.
+_BASE_: "gkx_table1_figure3_v4.yaml"
+GENERAL:
+  NAME: "gkx_pcr_full_v5"
+RUN:
+  FITTING: "dense"
+  MODELS:
+    ENABLED: ["PCR"]
+  OUTPUT_DIR: "results/gkx_pcr_full_v5"
