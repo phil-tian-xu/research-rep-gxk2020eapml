@@ -55,6 +55,15 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+SCRP production launcher: `run_pcr_scrp.sh`, with deployment config
+`gkx_pcr_scrp` inheriting v5 and changing only the output directory to
+`/data/users/s1155269217/GKX2020/results/gkx_pcr_full_v5`. Requests one node,
+8 CPUs, 192G RAM and two days; uses `.venv/bin/python`, capped BLAS threads
+and GNU time for Linux peak RSS. Supports `--stop-after-year` and `--resume`.
+Model fitting is unchanged. See `docs/Running Python on SCRP.md` for the
+1987-1996, 1997-2006 and 2007-2016 submissions, logs and output files.
+This launcher has not been submitted to SCRP by the agent.
+
 Current preference: use available machine RAM (64 GB installed), rather than
 designing around an 8-GiB target. Prefer complete annual training arrays and
 the original estimator; do not introduce batch QR fitting for this baseline.

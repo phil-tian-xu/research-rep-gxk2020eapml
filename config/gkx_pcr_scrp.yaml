@@ -1,0 +1,4 @@
+# SCRP deployment of v5; estimation settings are inherited unchanged.
+_BASE_: "gkx_pcr_full_v5.yaml"
+RUN:
+  OUTPUT_DIR: "/data/users/s1155269217/GKX2020/results/gkx_pcr_full_v5"

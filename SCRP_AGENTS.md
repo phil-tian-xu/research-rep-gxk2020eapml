@@ -77,3 +77,34 @@ with resources allocated through Slurm.
 
 Use `compute` for interactive work on allocated resources and `sbatch` for unattended runs. Check current account limits and resource availability before
 submitting a job, and request resources appropriate to the task.
+
+## Data transfer to SCRP
+Agreed on 2026-09-24: use a separate **PC on the CUHK campus network as the intermediary for data uploads**. Transfers from the primary PC repeatedly disconnected; the campus-PC test was fast and successful. The exact cause of the earlier connection resets was not established.
+### Standard workflow
+1. Transfer data from the primary PC to the campus PC using **Baidu Netdisk**.
+2. Place the downloaded files or directories under **`D:/data_transfer/`** on the campus PC.
+3. Upload from the campus PC to SCRP using **SFTP**, the preferred transfer method.
+4. Verify completeness and, where available, checksums before using the uploaded data. Preserve the original local copies.
+
+### Connection and destination
+- **Server:** `scrp-login.econ.cuhk.edu.hk`
+- **Username:** `s1155269217`
+- **Local staging directory:** `D:/data_transfer/`
+- **Remote project data root:** `/data/users/s1155269217/GKX2020/data/`
+- The remote subdirectory depends on the dataset and its purpose. Prepared datasets currently go under `processed/`.
+
+### SFTP File Transfer
+Prefer a **single PowerShell command run on the campus PC**, supplying the SFTP instructions automatically. Prompt for authentication; do not embed passwords.
+
+Example: upload `D:/data_transfer/gkx_dev_p05_seed2020_parquet` into the remote `processed/` directory:
+
+```
+@('cd /data/users/s1155269217/GKX2020/data/processed', 'put -R D:/data_transfer/gkx_dev_p05_seed2020_parquet', 'bye') | sftp -o ServerAliveInterval=30 -o ServerAliveCountMax=6 s1155269217@scrp-login.econ.cuhk.edu.hk
+```
+
+The remote parent directory must already exist. If the dataset directory already exists, its `mkdir` error is expected; inspect any other errors. `put -R` uploads recursively and overwrites matching remote filenames—it does not provide incremental synchronization.
+
+For future transfers, adapt the source folder and remote destination while retaining this campus-PC workflow.
+
+## Running Project on SCRP
+Please refer to `docs/Running Python on SCRP` for detailed instructions.
