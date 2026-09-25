@@ -1,0 +1,11 @@
+# Bounded local check of the same PCR K=0..100 workflow on the fixed 5% sample.
+_BASE_: "gkx_pcr_full_v5.yaml"
+GENERAL:
+  NAME: "gkx_pcr_p05_check"
+DATA:
+  DATASET: "gkx_dev_p05_seed2020_parquet"
+RUN:
+  SPLIT:
+    FIRST_TEST_YEAR: 1987
+    LAST_TEST_YEAR: 1988
+  OUTPUT_DIR: "results/gkx_pcr_p05_check"

@@ -55,6 +55,23 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+Independent annual tasks (2026-09-26): `core.annual_jobs prepare/run/collect`
+and `run_annual_scrp.sh` reuse main/model/loading code unchanged. Preparation
+snapshots one config per test year and separate run parents; retries resume the
+same annual run. Default array 0-7%8 requests 8 CPUs/128G/two hours per task.
+First intended SCRP experiment: PCR 2009-2016. Collection checks complete,
+compatible, nonduplicate annual checkpoints and creates pooled Table 1 and
+Figure 3 diagnostics without loading features. See
+`docs/working_notes/Annual Parallel Runs.md` for commands and limits.
+Phil's standalone 2016 SCRP result: K=6, R2=0.709179%, peak RSS 96.275 GiB,
+elapsed 730.68 seconds. This supersedes the earlier unmeasured full-window
+estimates below. Eight simultaneous tasks have not yet been tested on SCRP.
+Local verification: 155 tests pass. Two real 5% annual tasks (1987/1988) and
+collection completed in `results/pcr_parallel_local_check_20260926`; K=14/16,
+pooled R2=0.477986%, peaks 0.980/1.100 GiB. Selected K and predictions agree
+with the saved v1 pilot (absolute prediction tolerance 1e-10). Bash syntax
+check passed. `gkx_pcr_p05_check` is the bounded local two-year config.
+
 Memory counters now auto-select Windows APIs or Linux /proc + getrusage;
 `main.py --memory` and the existing memory diagnostics use the same function.
 Linux private committed memory is unavailable (null), not substituted by virtual
