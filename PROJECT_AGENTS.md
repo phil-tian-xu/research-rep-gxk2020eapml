@@ -55,6 +55,24 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+Unified interface: `run_experiment.py pcr/pls --local/--scrp --sample p05/full
+--years FIRST:LAST`, plus `list [--refresh]`, `resume ID`, and `collect ID`.
+Uses existing baselines PCR=v5 and PLS=p05_v1; writes all resolved/year configs
+inside one experiment directory, no ad hoc files in config/. Calls sbatch via
+subprocess and records submission IDs/resources/commands in launch.json. Listing
+scans these records and separates saved checkpoint counts from optional Slurm
+status. Existing main/annual worker/model/launch scripts are unchanged, so current
+runs retain their execution identities. Legacy manually launched experiments
+are not automatically listed. See `docs/Running Experiments.md` (primary guide)
+and `config/README.md`. No cluster jobs were submitted during implementation.
+End-to-end local checks through the unified command completed for 1987 on the
+fixed 5% sample: PCR R2=0.463759%, PLS R2=0.581663%; both produced combined
+reports and discoverable launch records under `results/experiments/`.
+Verification: 165 tests passed, including mocked Slurm submission/accounting,
+retry protection, preserved settings and listing. Real PCR resume recognized its
+completed checkpoint without refitting. Live SCRP submission through this new
+wrapper remains for Phil to verify.
+
 Independent annual tasks (2026-09-26): `core.annual_jobs prepare/run/collect`
 and `run_annual_scrp.sh` reuse main/model/loading code unchanged. Preparation
 snapshots one config per test year and separate run parents; retries resume the

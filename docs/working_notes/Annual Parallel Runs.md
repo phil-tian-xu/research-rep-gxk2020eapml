@@ -1,5 +1,9 @@
 # Independent annual runs on SCRP
 
+For new experiments, use the unified commands in
+[Running Experiments](../Running%20Experiments.md). This document describes the
+underlying annual runner and remains applicable to arrays already submitted.
+
 The annual launcher reuses `main.py`, the full-array Parquet reader, and the
 original PCR/PLS estimators. Training windows, validation, tuning grids, float64
 precision and test evaluation are unchanged. Each task runs exactly one test

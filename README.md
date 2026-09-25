@@ -4,7 +4,8 @@ The project prioritizes correctness, reproducibility, and readable research code
 
 ---
 ## Current Status
-Initial project setup and structure design. The replication workflow is under development.
+PCR and PLS workflows support local 5% checks and full-universe SCRP runs.
+Replication results and execution performance are being validated.
 ---
 
 ## Structure
@@ -32,16 +33,34 @@ uv run python
 
 ## Usage
 
+For new PCR/PLS replication experiments use the unified command:
+
+```bash
+python -B run_experiment.py pcr --local --sample p05 --years 1987:1988
+python -B run_experiment.py list
+```
+
+On SCRP, from the repository with its environment active:
+
+```bash
+python -B run_experiment.py pcr --scrp --sample full --years 1987:2016 --parallel 4 --cpus 8 --mem 128G
+```
+
+See [Running Experiments](docs/Running%20Experiments.md) for PLS, results locations,
+resource settings, submission history, resume and collection. These commands use
+the original complete-array models. Existing running jobs retain their original
+commands and output directories.
+
 Run the configured models on a saved dataset:
 ```bash
 python main.py --config model_demo
 python main.py --config model_demo_nonlinear
 ```
 
-Both synthetic checks and real replication use this entry point. `DATA.DATASET`
-selects the prepared panel; `RUN` sets models, sample periods, evaluation, and
-optional output saving. The example configs use synthetic data. The real `gkx`
-panel and its empirical config still need to be prepared.
+Both synthetic checks and real replication use this underlying entry point.
+`DATA.DATASET` selects the prepared panel; `RUN` sets models, sample periods,
+evaluation and output saving. The example configs above use synthetic data;
+the unified launcher uses the prepared GKX Parquet datasets.
 
 See [run configuration](docs/working_notes/Experiment%20Configuration.md) for
 dataset preparation, config settings, and saved outputs.

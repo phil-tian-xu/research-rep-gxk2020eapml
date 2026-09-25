@@ -1,3 +1,6 @@
+For new PCR/PLS experiments, use [Running Experiments](Running%20Experiments.md).
+The instructions below remain available for environment setup and older runs.
+
 ### 1. Log in from the local PC
 
 ```
