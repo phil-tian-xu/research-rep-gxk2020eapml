@@ -20,6 +20,24 @@ class PanelBatch:
     return_month: np.ndarray
 
 
+def load_window(panel, first_year, last_year):
+    """Fill ordinary arrays from Parquet pieces; return the complete window."""
+    window = panel.window(first_year, last_year)
+    X = np.empty((window.n_rows, len(panel.features)), dtype=np.float64)
+    y = np.empty(window.n_rows, dtype=np.float64)
+    positions = np.empty(window.n_rows, dtype=np.int64)
+    months = np.empty(window.n_rows, dtype="U7")
+    start = 0
+    for batch in window.batches():
+        end = start + len(batch.y)
+        X[start:end], y[start:end] = batch.X, batch.y
+        positions[start:end], months[start:end] = batch.row_position, batch.return_month
+        start = end
+    if start != window.n_rows:
+        raise ValueError("Loaded row count differs from the window metadata.")
+    return X, y, positions, months
+
+
 class ParquetPanel:
     def __init__(self, folder, *, batch_size=10000):
         if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:

@@ -55,6 +55,20 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+PCR SVD correction (2026-09-25): the SCRP run completed 1987–2010 but failed
+in 2011 at SciPy's 32-bit matrix-index guard. PCR now uses NumPy economy SVD;
+Phil confirmed SCRP NumPy has OpenBLAS USE64BITINT (ILP64). Full-sized 2011
+verification and migration of the saved run remain pending. Resume hash checks
+are unchanged. See `docs/working_notes/Full Universe PCR Workflow.md`.
+
+Local PLS development: `python -B main.py --config gkx_pls_p05_v1 --memory`
+uses the fixed 5% Parquet sample, original complete-array PLS, K=0..10, and
+1987–2016 annual testing. Supports stop/resume and existing Table 1/Figure 3
+reports. The shared dense runner supports one PCR or PLS specification per run;
+the full-window loader is in `core/data_query/parquet_dataset.py`.
+See `docs/working_notes/PLS Small Sample Workflow.md`. Keep the active SCRP PCR
+checkout unchanged until its run/resumes finish because execution hashes are strict.
+
 SCRP production launcher: `run_pcr_scrp.sh`, with deployment config
 `gkx_pcr_scrp` inheriting v5 and changing only the output directory to
 `/data/users/s1155269217/GKX2020/results/gkx_pcr_full_v5`. Requests one node,

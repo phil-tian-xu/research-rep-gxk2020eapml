@@ -17,30 +17,12 @@ import numpy as np
 import pandas as pd
 
 from core.data_examine.csv_memory import process_memory
-from core.data_query.parquet_dataset import ParquetPanel
+from core.data_query.parquet_dataset import ParquetPanel, load_window
 from core.evaluation.prediction_metrics import zero_benchmark_r2
 from core.losses import mse_loss
 from core.models import PCRRegressor
 from core.run_state import atomic_write, resolve_run_dir
 from utils.path_info import data_path
-
-
-def load_window(panel, first_year, last_year):
-    """Fill ordinary arrays from Parquet pieces; return the complete window."""
-    window = panel.window(first_year, last_year)
-    X = np.empty((window.n_rows, len(panel.features)), dtype=np.float64)
-    y = np.empty(window.n_rows, dtype=np.float64)
-    positions = np.empty(window.n_rows, dtype=np.int64)
-    months = np.empty(window.n_rows, dtype="U7")
-    start = 0
-    for batch in window.batches():
-        end = start + len(batch.y)
-        X[start:end], y[start:end] = batch.X, batch.y
-        positions[start:end], months[start:end] = batch.row_position, batch.return_month
-        start = end
-    if start != window.n_rows:
-        raise ValueError("Loaded row count differs from the window metadata.")
-    return X, y, positions, months
 
 
 def experiment(parquet_dir, *, test_year=1987, components=10, first_train_year=1957,

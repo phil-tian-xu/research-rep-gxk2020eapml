@@ -80,6 +80,21 @@ the large/small stock rows are not added here. Plots show PCR only for this conf
 
 ## Verification and memory evidence
 
+2026-09-25 SVD backend correction: Phil's SCRP run saved 1987–2010, then
+SciPy SVD rejected the 2011 training matrix (2,336,991 x 920 = 2,150,031,720
+elements) at its 32-bit indexing guard. PCR now calls `numpy.linalg.svd` with
+`full_matrices=False`. Phil's NumPy configuration reports OpenBLAS
+`USE64BITINT` (ILP64). This preserves float64 economy SVD and the PCR method;
+large runs require that 64-bit-index backend. No changes to PLS, data,
+component grids, checkpoint files, or resume validation were made for this fix.
+145 tests pass, including SciPy-versus-NumPy PCR predictions, validation losses,
+and selected K. A real 5% check for 1987 selected K=14, matching the saved
+SciPy run; maximum prediction difference was 1.87e-16 and maximum validation
+MSE difference across K=0..100 was 6.94e-18. The full 2011 window still needs
+verification on SCRP.
+Existing run source hashes will reject ordinary resume after this code change;
+continuation of the saved run requires a separately documented migration.
+
 143 tests passed, including complete-array versus original-run predictions,
 validation scores and selected K; staged versus uninterrupted execution;
 memory on/off invariance; failure recovery; and PCR-only diagnostic generation.

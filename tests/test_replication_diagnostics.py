@@ -41,7 +41,7 @@ class EmpiricalModelTests(unittest.TestCase):
             for standardize in (True, False):
                 candidates = [{"n_components": k, "fit_intercept": intercept, "standardize": standardize}
                               for k in (3, 0, 1, 2)]
-                with patch("core.models.dimension_reduction.svd", wraps=svd) as decomposition:
+                with patch("core.models.dimension_reduction.svd", wraps=np.linalg.svd) as decomposition:
                     result = tune_hyperparameters(PCRRegressor, candidates, self.X, self.y, validation, self.y[:20])
                     self.assertEqual(decomposition.call_count, 1)
                 scores = []
@@ -52,6 +52,31 @@ class EmpiricalModelTests(unittest.TestCase):
                 self.assertEqual(result.best_params, candidates[int(np.argmin(scores))])
                 expected = PCRRegressor(**result.best_params).fit(self.X, self.y)
                 assert_allclose(result.best_estimator.predict(validation), expected.predict(validation), atol=1e-12)
+
+    def test_pcr_numpy_svd_agrees_with_previous_scipy_backend(self):
+        # Compare predictions and selection, which are invariant to SVD vector signs.
+        X = np.column_stack((self.X, self.X[:, 0], np.zeros(len(self.X))))
+        validation = X[:30] + .3
+        for intercept in (True, False):
+            for standardize in (True, False):
+                with self.subTest(intercept=intercept, standardize=standardize):
+                    candidates = [{"n_components": k, "fit_intercept": intercept,
+                                   "standardize": standardize} for k in range(5)]
+                    actual = tune_hyperparameters(PCRRegressor, candidates, X, self.y,
+                                                  validation, self.y[:30])
+                    with patch("core.models.dimension_reduction.svd", side_effect=svd):
+                        previous = tune_hyperparameters(PCRRegressor, candidates, X, self.y,
+                                                        validation, self.y[:30])
+                    self.assertEqual(actual.best_params, previous.best_params)
+                    assert_allclose([r["validation_loss"] for r in actual.validation_results],
+                                    [r["validation_loss"] for r in previous.validation_results],
+                                    rtol=1e-11, atol=1e-13)
+                    for k in range(5):
+                        current = PCRRegressor(k, fit_intercept=intercept, standardize=standardize).fit(X, self.y)
+                        with patch("core.models.dimension_reduction.svd", side_effect=svd):
+                            old = PCRRegressor(k, fit_intercept=intercept, standardize=standardize).fit(X, self.y)
+                        assert_allclose(current.predict(validation), old.predict(validation),
+                                        rtol=1e-10, atol=1e-12)
 
     def test_svd_huber_matches_independent_bfgs_objective_and_predictions(self):
         X = np.column_stack((self.X, self.X[:, 0], np.zeros(len(self.X))))

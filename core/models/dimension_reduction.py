@@ -7,7 +7,7 @@ True uses centered covariances. No automatic component grid is assumed.
 
 import numpy as np
 from copy import copy
-from scipy.linalg import svd
+from numpy.linalg import svd
 
 from core.model_inputs import validate_model_inputs
 from ._helpers import clear_fit, prediction_data, prepare_features
@@ -41,7 +41,9 @@ class PCRRegressor:
         if self.n_components == 0:
             left, singular_values, right = np.empty((len(Z), 0)), np.empty(0), np.empty((0, Z.shape[1]))
         else:
-            left, singular_values, right = svd(Z, full_matrices=False, check_finite=False)
+            # NumPy's ILP64 backend on SCRP supports matrices exceeding 2**31 elements.
+            # Keep economy SVD and float64; large runs require an ILP64 NumPy build.
+            left, singular_values, right = svd(Z, full_matrices=False)
         rank_tolerance = np.finfo(float).eps * max(Z.shape) * (singular_values[0] if singular_values.size else 0)
         rank = int(np.count_nonzero(singular_values > rank_tolerance))
         if self.n_components > rank:

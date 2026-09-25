@@ -15,6 +15,7 @@ DATASET_PATHS = {
     "synthetic_nonlinear_v1": data_path / "experimental" / "synthetic_nonlinear_v1",
     # Prepared-panel destination only; no GKX dataset has been constructed here yet.
     "gkx": data_path / "processed" / "gkx",
+    "gkx_dev_p05_seed2020_parquet": data_path / "processed" / "gkx_dev_p05_seed2020_parquet",
     "gkx_parquet": data_path / "processed" / "gkx_parquet",
     "gkx_dev_p05_seed2020": data_path / "processed" / "gkx_dev_p05_seed2020",
     "gkx_dev_p10_seed2020": data_path / "processed" / "gkx_dev_p10_seed2020",

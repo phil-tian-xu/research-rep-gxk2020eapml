@@ -201,6 +201,40 @@ class BatchWorkflowTests(unittest.TestCase):
         for tuning in dense.tuning_history:
             self.assertEqual(tuning["best_params"], lazy[tuning["test_year"], tuning["specification"]]["tuning"]["best_params"])
 
+    def test_complete_array_pls_matches_original_and_resumes(self):
+        from core.dense_parquet_run import run_parquet as dense_run
+
+        self.cfg.RUN.FITTING = "dense"
+        self.cfg.RUN.MODELS.ENABLED = ["PLS"]
+        full = create_run(self.cfg, self.panel.info)
+        staged = create_run(self.cfg, self.panel.info)
+        original_fit = PLSRegressor.fit
+        fits = []
+
+        def fitted(model, X, y):
+            fits.append((len(y), model.n_components))
+            return original_fit(model, X, y)
+
+        with redirect_stdout(StringIO()), patch("core.batch_run.reduce_training", side_effect=AssertionError("No QR fitting")):
+            reference = run(self.X, self.y, self.months, self.cfg)
+            complete = dense_run(self.panel, self.cfg, checkpoint_dir=full)
+            dense_run(self.panel, self.cfg, checkpoint_dir=staged, stop_after_year=2003)
+            with patch.object(PLSRegressor, "fit", new=fitted):
+                resumed = dense_run(self.panel, self.cfg, checkpoint_dir=staged)
+        self.assertEqual(fits, [(n, k) for n in (108, 144) for k in range(4)])
+        pd.testing.assert_frame_equal(complete.annual_metrics, resumed.annual_metrics)
+        pd.testing.assert_frame_equal(pd.read_csv(complete.predictions_path), pd.read_csv(resumed.predictions_path))
+        assert_allclose(pd.read_csv(complete.predictions_path).prediction,
+                        reference.predictions.prediction, atol=1e-14, rtol=1e-12)
+        assert_allclose(complete.summary.r2_zero, reference.summary.r2_zero, atol=1e-14)
+        saved = read_checkpoints(full, self.cfg)
+        for tuning in reference.tuning_history:
+            actual = saved[tuning["test_year"], "PLS"]["tuning"]
+            self.assertEqual(actual["best_params"], tuning["best_params"])
+            for a, b in zip(actual["validation_results"], tuning["validation_results"]):
+                self.assertAlmostEqual(a["validation_loss"], b["validation_loss"], places=14)
+                self.assertEqual(a["n_components"], b["n_components"])
+
     def test_failure_keeps_completed_models_and_resume_skips_them(self):
         folder = create_run(self.cfg, self.panel.info)
         with redirect_stdout(StringIO()), patch("core.batch_run.fit_huber", side_effect=RuntimeError("test failure")):

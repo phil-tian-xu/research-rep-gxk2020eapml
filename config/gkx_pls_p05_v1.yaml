@@ -1,0 +1,32 @@
+# Local development: fixed 5% security sample, original complete-array PLS.
+# K=0..10 is our agreed pilot grid; K=0 forecasts the training mean.
+GENERAL:
+  NAME: "gkx_pls_p05_v1"
+  TASK_TYPE: "run"
+DATA:
+  DATASET: "gkx_dev_p05_seed2020_parquet"
+  FORMAT: "parquet"
+  BATCH_SIZE: 10000
+RUN:
+  FITTING: "dense"
+  SPLIT:
+    FIRST_TRAIN_YEAR: 1957
+    FIRST_TEST_YEAR: 1987
+    LAST_TEST_YEAR: 2016
+    VALIDATION_YEARS: 12
+  MODELS:
+    ENABLED: ["PLS"]
+    FIT_INTERCEPT: true
+    STANDARDIZE: false
+    PLS:
+      COMPONENT_GRID: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      TOL: 1.0e-12
+  EVALUATION:
+    VALIDATION:
+      NAME: "mse"
+      DELTA: null
+    TEST:
+      NAME: "mse"
+      DELTA: null
+  REPORT_TABLE1_FIGURE3: true
+  OUTPUT_DIR: "results/gkx_pls_p05_v1"

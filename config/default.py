@@ -74,7 +74,7 @@ _C.DATA.STATIC_DATA.IS_ON = False
 # Empty grids / None thresholds require an explicit run choice; they are
 # not filled with guessed author settings. See model_demo.yaml for toy-run choices.
 _C.RUN = CfgNode({
-    "FITTING": "batch",  # Parquet only: 'dense' loads whole annual windows (PCR).
+    "FITTING": "batch",  # Parquet only: 'dense' loads whole annual windows (PCR or PLS).
     "SPLIT": {
         "FIRST_TRAIN_YEAR": 1957,
         "FIRST_TEST_YEAR": 1987,
