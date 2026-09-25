@@ -95,6 +95,6 @@ printf '\n'
 "$python_bin" -c 'import numpy, scipy, pandas, pyarrow, matplotlib, yaml, iopath; from importlib.metadata import distributions; print("\n".join(sorted(d.metadata["Name"] + "==" + d.version for d in distributions())))' > "$job_dir/packages.txt"
 
 # GNU time records the process peak on Linux without changing model fitting.
-# Do not use the current Windows-only --memory option here.
+# main.py --memory also supports Linux; this launcher retains GNU time reporting.
 # exec preserves Python/time's exit status for Slurm, including failures.
 exec /usr/bin/time -v -o "$job_dir/time.txt" "$python_bin" -u -B main.py "${args[@]}"

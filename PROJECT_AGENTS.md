@@ -55,6 +55,15 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+Memory counters now auto-select Windows APIs or Linux /proc + getrusage;
+`main.py --memory` and the existing memory diagnostics use the same function.
+Linux private committed memory is unavailable (null), not substituted by virtual
+memory. Peaks cover the current process only, excluding child processes.
+For 2016, `core.data_examine.pcr_full_memory --test-year 2016 --components 100`
+is an existing fixed-K diagnostic. The tuned `gkx_pcr_2016_check` config was
+provided as a server-side creation command and is not present locally.
+See `docs/Running Python on SCRP.md` for both commands. No new config was added.
+
 PCR SVD correction (2026-09-25): the SCRP run completed 1987–2010 but failed
 in 2011 at SciPy's 32-bit matrix-index guard. PCR now uses NumPy economy SVD;
 Phil confirmed SCRP NumPy has OpenBLAS USE64BITINT (ILP64). Full-sized 2011

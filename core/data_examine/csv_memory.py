@@ -6,7 +6,7 @@ From the repository root:
 
 The default is the full prepared GKX CSV. A neighboring metadata.json, when
 present, supplies the same columns/string dtypes used by the workflow loader.
-Process counters use the Windows API; DataFrame reporting works on other OSes.
+Process counters automatically use the Windows API or Linux /proc and getrusage.
 """
 
 import argparse
@@ -14,6 +14,7 @@ import ctypes
 from ctypes import wintypes
 import json
 import os
+import sys
 from pathlib import Path
 from time import perf_counter
 
@@ -23,11 +24,29 @@ from utils.path_info import data_path
 
 
 def process_memory():
-    """Return Windows process counters in bytes; None when unavailable.
+    """Return Windows/Linux process counters in bytes; None on unsupported OSes.
 
     peak_resident_bytes is the OS-maintained lifetime peak, so brief spikes
-    between Python sampling points are included.
+    between Python sampling points are included. These counters describe this
+    process, not the combined memory of child processes or the whole Slurm job.
+    Linux has no equivalent here for Windows private committed memory.
     """
+    if sys.platform.startswith("linux"):
+        import resource
+
+        status = {}
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith(("VmRSS:", "VmHWM:")):
+                name, value, unit = line.split()
+                if unit != "kB":
+                    raise ValueError(f"Unexpected Linux memory unit: {unit}")
+                status[name.rstrip(":")] = int(value) * 1024
+        # Linux ru_maxrss is KiB. Query after /proc to include any intervening peak.
+        peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * 1024
+        return {"resident_bytes": status["VmRSS"],
+                "peak_resident_bytes": max(peak, status.get("VmHWM", 0), status["VmRSS"]),
+                "private_committed_bytes": None}
+
     if os.name != "nt":
         return None
 
@@ -57,15 +76,18 @@ def process_memory():
 
 
 def report_process_memory(label):
-    """Report resident RAM separately from committed virtual memory on Windows."""
+    """Report resident RAM and, on Windows, private committed memory."""
     counters = process_memory()
     if counters is None:
-        print(f"{label}: process counters are available on Windows only.", flush=True)
+        print(f"{label}: process counters are unavailable on this OS.", flush=True)
         return
+    committed = counters["private_committed_bytes"]
+    private_report = (f"{committed / 1024**3:.3f} GiB" if committed is not None
+                      else "unavailable on this OS")
     print(
         f"{label}: resident RAM={counters['resident_bytes'] / 1024**3:.3f} GiB; "
         f"process-lifetime peak RAM={counters['peak_resident_bytes'] / 1024**3:.3f} GiB; "
-        f"private committed memory={counters['private_committed_bytes'] / 1024**3:.3f} GiB",
+        f"private committed memory={private_report}",
         flush=True,
     )
 

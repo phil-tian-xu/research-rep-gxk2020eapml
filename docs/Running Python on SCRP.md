@@ -152,8 +152,46 @@ invocation's process peak, not an annual breakdown. A forced job termination
 may prevent the final timing report; use available Slurm accounting in that case.
 Python failures propagate as a failed job rather than a success message.
 
-This script uses GNU time instead of `--memory`, whose current counters support
-Windows only. The estimation code is unchanged.
+This script uses GNU time for its final process peak. `main.py --memory` now
+also supports Linux automatically, using /proc for current RSS and getrusage
+for the process-lifetime peak; Windows retains its existing API. Both measure
+one process, not the total of multiprocessing workers. The estimation code is unchanged.
+
+### Existing 2016 memory checks
+
+The existing standalone diagnostic accepts the largest window without a config:
+
+```bash
+compute -c 8 --mem=192G -t 2-00:00:00 bash
+cd ~/research-rep-gxk2020eapml
+export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK"
+export OPENBLAS_NUM_THREADS="$SLURM_CPUS_PER_TASK"
+export MKL_NUM_THREADS="$SLURM_CPUS_PER_TASK"
+export MPLBACKEND=Agg
+.venv/bin/python -u -B -m core.data_examine.pcr_full_memory \
+  --test-year 2016 --components 100 \
+  --output-dir /data/users/s1155269217/GKX2020/results/pcr_full_memory_2016
+exit
+```
+
+This fits fixed K=100; it does not perform K=0..100 validation selection. It
+prints the process peak and saves `report.json` under a new timestamped folder.
+The memory allocation is provisional; use measured peaks to plan later jobs.
+
+For the complete annual tuning workflow, the previously supplied server-only
+`config/gkx_pcr_2016_check.yaml` inherits `gkx_pcr_full_v5.yaml`, overrides both
+test-year bounds to 2016, and uses a separate output directory. It is not in
+the local repository. If that config was created on SCRP, run this command
+inside the same compute allocation instead of the fixed-K diagnostic:
+
+```bash
+.venv/bin/python -u -B main.py --config gkx_pcr_2016_check --memory
+```
+
+This prints and saves current/peak RSS at workflow stages and the final
+`MAXIMUM OBSERVED PYTHON RAM`; `memory_*.json` is in the printed run directory.
+Keep the SSH session open for interactive runs. Do not change the checkout
+used by an already running production job; test changes in a separate checkout.
 
 At the end of each successful stage, the timestamped run's `table1_figure3/`
 directory contains:

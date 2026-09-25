@@ -1,4 +1,4 @@
-"""Optional Windows process memory observations; never changes estimation."""
+"""Optional Windows/Linux process memory observations; never changes estimation."""
 
 from datetime import datetime, timezone
 import json
@@ -32,7 +32,7 @@ class MemoryReport:
                 print("[memory] OS process counters unavailable.", flush=True)
             if self.folder is not None:
                 atomic_write(self.folder / f"memory_{self.stamp}.json", json.dumps({
-                    "scope": "Process-lifetime resident peak; each resume starts a new process.",
+                    "scope": "Current process only, excluding children; lifetime resident peak; each resume starts a new process.",
                     "peak_resident_gib": counters["peak_resident_bytes"] / 1024**3 if counters else None,
                     "stages": self.stages}, indent=2))
         except Exception as error:
