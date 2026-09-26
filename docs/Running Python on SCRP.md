@@ -187,3 +187,8 @@ Check afterwards
 sacct -X -j 398040 --starttime 2026-09-26 \
   --format=JobID%22,State%24,ExitCode,Elapsed
 ```
+
+Check user submisstion status
+```
+squeue -u "$USER" -o "%.20i %.10T %.12q %.10m %R"
+```

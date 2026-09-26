@@ -153,6 +153,69 @@ class ExperimentLauncherTests(unittest.TestCase):
                                "--root", str(self.root / "invalid"), *options])
         self.assertFalse((self.root / "invalid").exists())
 
+    def test_aihub_and_scrp_share_research_settings_but_not_deployment(self):
+        for model in launcher.BASELINES:
+            with self.subTest(model=model):
+                scrp = self.prepare(model, years="1987", sample="p05")
+                hub = self.prepare(model, backend="--aihub", years="1987", sample="p05")
+                self.assertEqual((scrp / "research.yaml").read_bytes(), (hub / "research.yaml").read_bytes())
+                _, scrp_plan = load_plan(scrp / "annual")
+                _, hub_plan = load_plan(hub / "annual")
+                self.assertEqual(scrp_plan["runtime"], hub_plan["runtime"])
+                record = launcher.read_launch(hub)
+                self.assertEqual(record["backend"], "aihub")
+                self.assertEqual(record["resources"]["parallel"], 1)
+                command = record["submissions"][-1]["sbatch_command"]
+                self.assertIn("--array=0%1", command)
+                self.assertEqual(Path(command[-2]).name, "run_annual_aihub.sh")
+                self.assertFalse(any(flag.startswith(("--account=", "--partition=", "--qos=")) for flag in command))
+                script = Path(command[-2]).read_bytes()
+                self.assertNotIn(b"\r", script)
+                self.assertNotIn(b"#SBATCH --gres", script)
+                scrp_command = launcher.read_launch(scrp)["submissions"][-1]["sbatch_command"]
+                for flag in ("--account=pg", "--partition=scrp", "--qos=c32g4", "--array=0%4"):
+                    self.assertIn(flag, scrp_command)
+
+    def test_aihub_resume_preserves_backend_overrides_and_dependency(self):
+        folder = self.prepare(backend="--aihub")
+        with patch("run_experiment.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "321\n", "")) as run:
+            launcher.main(["resume", str(folder), "--account", "test-account", "--partition", "test-partition",
+                           "--qos", "test-qos", "--after", "123"])
+        for flag in ("--account=test-account", "--partition=test-partition", "--qos=test-qos", "--dependency=afterany:123"):
+            self.assertIn(flag, run.call_args.args[0])
+        launcher.main(["resume", str(folder), "--dry-run"])
+        record = launcher.read_launch(folder)
+        self.assertEqual(record["backend"], "aihub")
+        self.assertEqual(record["resources"]["account"], "test-account")
+        self.assertEqual(record["resources"]["parallel"], 1)
+
+    def test_aihub_limits_fail_before_preparation_and_on_resume(self):
+        for options in (["--parallel", "2"], ["--mem", "245761M"], ["--cpus", "61"],
+                        ["--time", "1-00:00:01"], ["--time", "00:00:00"], ["--time", "00:99:00"]):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                launcher.main(["pcr", "--aihub", "--sample", "full", "--years", "2016",
+                               "--root", str(self.root / "invalid"), "--dry-run", *options])
+        self.assertFalse((self.root / "invalid").exists())
+        folder = self.prepare(backend="--aihub")
+        with self.assertRaisesRegex(ValueError, "240G"):
+            launcher.main(["resume", str(folder), "--parallel", "2", "--dry-run"])
+        self.assertEqual(len(launcher.read_launch(folder)["submissions"]), 1)
+
+    def test_aihub_root_lookup_listing_and_no_backend_migration(self):
+        with patch.dict("os.environ", {}, clear=True), patch("run_experiment.shutil.which", return_value="sbatch"):
+            self.assertEqual(launcher.results_root(aihub=True), launcher.ROOT / "results/aihub_experiments")
+            self.assertNotEqual(launcher.results_root(aihub=True), launcher.results_root(scrp=True))
+        folder = self.prepare(backend="--aihub")
+        launcher.main(["resume", folder.name, "--aihub", "--root", str(folder.parent), "--dry-run"])
+        rows = launcher.main(["list", "--aihub", "--root", str(folder.parent)])
+        self.assertEqual(len(rows), 1)
+        with patch("run_experiment.collect") as collect:
+            launcher.main(["collect", folder.name, "--aihub", "--root", str(folder.parent)])
+        collect.assert_called_once_with(folder / "annual")
+        scrp = self.prepare()
+        with self.assertRaisesRegex(ValueError, "another backend"):
+            launcher.main(["resume", str(scrp), "--aihub", "--dry-run"])
+
 
 if __name__ == "__main__":
     unittest.main()

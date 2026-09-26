@@ -1,4 +1,4 @@
-"""Local/SCRP PCR, PLS, ENet+H and OLS-3+H. See docs/Running Experiments.md."""
+"""Local/SCRP/AI Hub PCR, PLS, ENet+H and OLS-3+H. See docs/Running Experiments.md."""
 
 import argparse
 from collections import Counter, defaultdict
@@ -31,20 +31,22 @@ def timestamp():
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
 
-def results_root(value=None, *, scrp=False):
+def results_root(value=None, *, scrp=False, aihub=False):
     if value or os.environ.get("GKX_EXPERIMENT_ROOT"):
         return Path(value or os.environ["GKX_EXPERIMENT_ROOT"]).expanduser().resolve()
+    if aihub:
+        return ROOT / "results" / "aihub_experiments"
     if scrp or shutil.which("sbatch"):
         # Reuse this project's existing deployment setting; no second site config.
         return Path(load_config("gkx_pcr_scrp").RUN.OUTPUT_DIR).parent / "experiments"
     return ROOT / "results" / "experiments"
 
 
-def resolve_experiment(value, root=None):
+def resolve_experiment(value, root=None, *, aihub=False):
     path = Path(value).expanduser()
     if path.is_dir():
         return path.resolve()
-    path = results_root(root) / value
+    path = results_root(root, aihub=aihub) / value
     if not path.is_dir():
         raise ValueError(f"Experiment not found: {value}. Use list or provide its full path.")
     return path.resolve()
@@ -68,6 +70,7 @@ def year_range(value):
 
 
 def execution_options(args, previous=None):
+    aihub = getattr(args, "aihub", False)
     options = dict(previous or {})
     for key in ("parallel", "cpus", "mem", "time", "account", "partition", "qos"):
         value = getattr(args, key, None)
@@ -78,26 +81,38 @@ def execution_options(args, previous=None):
     model = getattr(args, "command", "")
     options.setdefault("mem", {"pcr": "128G", "ols3": "8G"}.get(model, "192G"))
     options.setdefault("time", {"pcr": "02:00:00", "ols3": "01:00:00"}.get(model, "12:00:00"))
-    options.setdefault("account", "pg")
-    options.setdefault("partition", "scrp")
-    options.setdefault("qos", "c32g4")
+    options.setdefault("account", None if aihub else "pg")
+    options.setdefault("partition", None if aihub else "scrp")
+    options.setdefault("qos", None if aihub else "c32g4")
     if options["cpus"] < 1 or options["parallel"] < 1:
         raise ValueError("CPUs and parallel tasks must be positive.")
     if not re.fullmatch(r"[1-9]\d*[MG]", options["mem"]):
         raise ValueError("Memory must be a positive amount in M or G, e.g. 128G.")
     if not re.fullmatch(r"(?:\d+-)?\d+:\d{2}:\d{2}", options["time"]):
         raise ValueError("Time must use HH:MM:SS or D-HH:MM:SS.")
-    if not args.scrp and options["parallel"] != 1:
+    if aihub:
+        memory_mib = int(options["mem"][:-1]) * (1024 if options["mem"][-1] == "G" else 1)
+        days, _, clock = options["time"].rpartition("-")
+        hours, minutes, seconds = map(int, clock.split(":"))
+        duration = int(days or 0) * 86400 + hours * 3600 + minutes * 60 + seconds
+        if options["parallel"] * memory_mib > 240 * 1024:
+            raise ValueError("AI Hub array requests exceed the documented 240G per-user memory budget; reduce --parallel.")
+        if options["parallel"] * options["cpus"] > 60:
+            raise ValueError("AI Hub array requests exceed the documented 60-CPU per-user budget.")
+        if not 0 < duration <= 86400 or minutes >= 60 or seconds >= 60:
+            raise ValueError("AI Hub task time must be positive and no more than 24 hours.")
+    if not (args.scrp or aihub) and options["parallel"] != 1:
         raise ValueError("Local execution runs annual tasks sequentially; use --parallel 1.")
     return options
 
 
 def prepare_experiment(args, argv):
     options = execution_options(args)
-    if not args.scrp and not args.dry_run and shutil.which("sbatch") and not os.environ.get("SLURM_JOB_ID"):
-        raise ValueError("Use --scrp on a cluster login node, or run --local inside a compute allocation.")
-    if args.scrp and not args.dry_run and not shutil.which("sbatch"):
-        raise ValueError("Run --scrp on the SCRP login node with sbatch available. No SSH submission is performed.")
+    slurm = args.scrp or args.aihub
+    if not slurm and not args.dry_run and shutil.which("sbatch") and not os.environ.get("SLURM_JOB_ID"):
+        raise ValueError("Use --scrp or --aihub on a cluster login node, or run --local inside a compute allocation.")
+    if slurm and not args.dry_run and not shutil.which("sbatch"):
+        raise ValueError("Run on the selected cluster with sbatch available. No SSH submission is performed.")
     config_name = args.config or BASELINES[args.command]
     cfg = load_config(config_name)
     if list(cfg.RUN.MODELS.ENABLED) != [MODEL_NAMES[args.command]]:
@@ -109,14 +124,14 @@ def prepare_experiment(args, argv):
     if not cfg.RUN.SPLIT.FIRST_TEST_YEAR <= first <= last <= cfg.RUN.SPLIT.LAST_TEST_YEAR:
         raise ValueError("Requested years exceed this research config's test horizon.")
     run_id = f"{args.command}_{args.sample}_{first}-{last}_{timestamp()}"
-    folder = results_root(args.root, scrp=args.scrp) / run_id
+    folder = results_root(args.root, scrp=args.scrp, aihub=args.aihub) / run_id
     folder.mkdir(parents=True, exist_ok=False)
     # This resolved input and generated annual configs live with results, not config/.
     atomic_write(folder / "research.yaml", cfg.dump())
     prepare(str((folder / "research").resolve()), first, last, folder / "annual")
     record = {"schema_version": 1, "id": run_id, "model": MODEL_NAMES[args.command],
               "sample": args.sample, "years": [first, last], "baseline_config": config_name,
-              "backend": "scrp" if args.scrp else "local", "created_utc": timestamp(),
+              "backend": "aihub" if args.aihub else "scrp" if args.scrp else "local", "created_utc": timestamp(),
               "command": [sys.executable, str(Path(__file__).resolve()), *argv],
               "repository": str(ROOT), "python": sys.executable,
               "launcher_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -168,10 +183,14 @@ def ensure_inactive(record):
 def execute(folder, args, argv):
     with run_lock(folder):
         record = read_launch(folder)
+        if args.aihub and record["backend"] != "aihub":
+            raise ValueError("--aihub cannot resume an experiment from another backend; prepare a separate experiment.")
         args.scrp = record["backend"] == "scrp"
+        args.aihub = record["backend"] == "aihub"
+        slurm = args.scrp or args.aihub
         options = execution_options(args, record["resources"])
-        if args.after and not args.scrp:
-            raise ValueError("--after applies only to SCRP submissions.")
+        if args.after and not slurm:
+            raise ValueError("--after applies only to Slurm submissions.")
         _, plan = load_plan(folder / "annual")
         if (plan["runtime"] != runtime_identity() or plan["orchestrator_sha256"] !=
                 hashlib.sha256((ROOT / "core" / "annual_jobs.py").read_bytes()).hexdigest()):
@@ -181,7 +200,7 @@ def execute(folder, args, argv):
         if not indices:
             print("Every annual checkpoint is saved. Use collect to generate/locate reports.")
             return
-        if not args.dry_run and args.scrp:
+        if not args.dry_run and slurm:
             ensure_inactive(record)
         submission_dir = folder / "submissions" / timestamp()
         submission_dir.mkdir(parents=True)
@@ -190,15 +209,16 @@ def execute(folder, args, argv):
         record["submissions"].append(attempt)
         record["resources"] = options
         record_path = folder / "launch.json"
-        if args.scrp:
-            script = submission_dir / "run_annual_scrp.sh"
+        if slurm:
+            script_name = "run_annual_aihub.sh" if args.aihub else "run_annual_scrp.sh"
+            script = submission_dir / script_name
             # Snapshot the generic script without changing the legacy entry point.
-            script.write_bytes((ROOT / "run_annual_scrp.sh").read_bytes().replace(b"\r\n", b"\n"))
+            script.write_bytes((ROOT / script_name).read_bytes().replace(b"\r\n", b"\n"))
             array = ",".join(map(str, indices)) + f"%{options['parallel']}"
             command = ["sbatch", "--parsable", f"--array={array}",
                        f"--cpus-per-task={options['cpus']}", f"--mem={options['mem']}",
-                       f"--time={options['time']}", f"--account={options['account']}",
-                       f"--partition={options['partition']}", f"--qos={options['qos']}",
+                       f"--time={options['time']}",
+                       *[f"--{key}={options[key]}" for key in ("account", "partition", "qos") if options[key]],
                        f"--job-name=gkx-{record['model'].lower()}",
                        f"--output={submission_dir}/slurm-%A_%a.out"]
             if args.after:
@@ -324,28 +344,33 @@ def parser():
         if name == "resume":
             cmd.add_argument("experiment", help="Saved experiment ID or directory.")
             cmd.set_defaults(scrp=False)
+            cmd.add_argument("--aihub", action="store_true", help="Look up the ID in the AI Hub results root.")
         else:
             backend = cmd.add_mutually_exclusive_group(required=True)
             backend.add_argument("--local", dest="scrp", action="store_false")
             backend.add_argument("--scrp", action="store_true")
+            backend.add_argument("--aihub", action="store_true")
+            cmd.set_defaults(scrp=False)
             cmd.add_argument("--sample", choices=SAMPLES, required=True)
             cmd.add_argument("--years", type=year_range, required=True)
             cmd.add_argument("--config", help="Optional versioned research config; defaults listed in the run guide.")
         cmd.add_argument("--root", help="Results root; otherwise GKX_EXPERIMENT_ROOT or the site default.")
-        cmd.add_argument("--parallel", type=int, help="Maximum concurrent Slurm annual jobs (default 4); local uses 1.")
+        cmd.add_argument("--parallel", type=int, help="Concurrent annual jobs: SCRP defaults to 4; AI Hub/local to 1.")
         cmd.add_argument("--cpus", type=int, help="CPUs/BLAS threads per annual task (default 8).")
         cmd.add_argument("--mem", help="RAM/task: PCR 128G, PLS/ENet 192G, OLS-3 8G; initial allocations.")
         cmd.add_argument("--time", help="Time/task: PCR 02:00:00, PLS/ENet 12:00:00, OLS-3 01:00:00.")
         for key in ("account", "partition", "qos"):
-            cmd.add_argument(f"--{key}", help="Override the SCRP deployment default.")
+            cmd.add_argument(f"--{key}", help="Override site settings; AI Hub omits this flag unless supplied.")
         cmd.add_argument("--after", help="Start after this entire Slurm job/array ends, even if it fails.")
         cmd.add_argument("--dry-run", action="store_true", help="Save the plan and print submission; no fitting/submission.")
     listing = commands.add_parser("list")
     listing.add_argument("--root")
+    listing.add_argument("--aihub", action="store_true")
     listing.add_argument("--refresh", action="store_true", help="Also query Slurm; otherwise read saved records only.")
     report = commands.add_parser("collect")
     report.add_argument("experiment")
     report.add_argument("--root")
+    report.add_argument("--aihub", action="store_true")
     return result
 
 
@@ -354,18 +379,18 @@ def main(argv=None):
     args = parser().parse_args(argv)
     if getattr(args, "after", None) and not re.fullmatch(r"\d+", args.after):
         raise ValueError("--after requires a numeric Slurm job/array ID.")
-    if args.command in BASELINES and not args.scrp and args.after:
-        raise ValueError("--after applies only to SCRP submissions.")
+    if args.command in BASELINES and not (args.scrp or args.aihub) and args.after:
+        raise ValueError("--after applies only to Slurm submissions.")
     if args.command == "list":
-        return list_experiments(results_root(args.root), args.refresh)
+        return list_experiments(results_root(args.root, aihub=args.aihub), args.refresh)
     if args.command == "collect":
-        folder = resolve_experiment(args.experiment, args.root)
+        folder = resolve_experiment(args.experiment, args.root, aihub=args.aihub)
         if (folder / "annual/combined/source_identity.json").is_file():
             print(f"Reports already saved: {folder / 'annual/combined'}")
         else:
             collect(folder / "annual")
         return
-    folder = (resolve_experiment(args.experiment, args.root) if args.command == "resume"
+    folder = (resolve_experiment(args.experiment, args.root, aihub=args.aihub) if args.command == "resume"
               else prepare_experiment(args, argv))
     execute(folder, args, argv)
     return folder

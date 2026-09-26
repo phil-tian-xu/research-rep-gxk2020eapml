@@ -458,6 +458,17 @@ retain that checkout/environment for queued tasks and retries. Keep experiment
 directories at their original paths while executing/resuming; copied directories
 can be listed, but embedded absolute run paths are intentionally not migrated.
 
+## AI Hub experiments
+
+Use `--aihub` instead of `--scrp` for a new AI Hub experiment. Use `--aihub`
+also on `list`, `resume ID` and `collect ID` to select its separate default root,
+`results/aihub_experiments/`. Explicit `--root` or `GKX_EXPERIMENT_ROOT` wins.
+AI Hub starts one annual task at a time and uses `run_annual_aihub.sh`; account,
+partition and QoS are omitted unless supplied. SCRP defaults remain unchanged.
+See [Running Python on AI Hub](Running%20Python%20on%20AI%20Hub.md) for setup,
+resource checks and the deferred comparison tests. Prepare a fresh experiment
+on AI Hub; do not migrate an unfinished SCRP experiment or its active checkout.
+
 ## Existing workflows
 
 The legacy `main.py`, `core.annual_jobs`, `run_pcr_scrp.sh` and

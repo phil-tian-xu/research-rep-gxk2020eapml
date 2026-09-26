@@ -1,5 +1,14 @@
 This file supplements `AGENTS.md` with details for this replication. Sections marked “To be added” are not yet specified.
 
+## Progress tracker — Phil edits only
+- `docs/Progress Tracker.md` is Phil's simple To do / In progress / Done tracker.
+- Only Phil may create or modify it. Agents must not write, update, move, or delete it,
+  including through scripts or automatic status synchronization.
+- Agents may read it and suggest specific updates in chat when progress changes.
+  If it is missing, provide a draft in chat for Phil to save; do not create it.
+- Distinguish a completed computation from reviewed replication results. Do not
+  assume that a submitted job has started or finished without evidence.
+
 ## Original Paper
 - **Title:** Empirical Asset Pricing via Machine Learning
 - **Authors:** Shihao Gu, Bryan Kelly, and Dacheng Xiu
@@ -55,6 +64,20 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+AI Hub deployment preparation (2026-09-27): `run_experiment.py --aihub` uses
+the separate `run_annual_aihub.sh`, backend record and default root
+`results/aihub_experiments/`. Use `--aihub` for list/resume/collect ID lookup too.
+Explicit root/environment overrides still take precedence. One concurrent task
+by default; documented student-budget checks: 240G aggregate array memory,
+60 aggregate CPUs, 24h/task. Account/partition/QoS are omitted unless supplied.
+SCRP scripts/config/default behavior and all annual worker/model sources remain
+unchanged. Preserve the active remote SCRP checkout. New AI Hub jobs must be
+prepared on that cluster with matching environment/data; no remote submission or
+numerical comparison has been performed. See `docs/Running Python on AI Hub.md`.
+Local verification: all 175 unit tests passed, including four new AI Hub launcher
+tests. Bash syntax/runtime testing is deferred because Bash is unavailable in
+the local environment; Slurm submission and cross-cluster numerical checks remain pending.
+
 ENet+H / OLS-3+H additions (2026-09-26): `run_experiment.py enet/ols3`
 uses `gkx_enet_huber_v1` / `gkx_ols3_huber_v1`; sample and years remain CLI choices.
 Dense annual fitting is in `core/dense_linear_run.py`, dispatched by the existing
