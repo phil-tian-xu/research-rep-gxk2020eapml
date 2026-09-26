@@ -1,0 +1,23 @@
+# Three ranked characteristics only; no macro interactions or industry dummies.
+GENERAL:
+  NAME: "gkx_ols3_huber_v1"
+  TASK_TYPE: "run"
+DATA:
+  DATASET: "gkx_dev_p05_seed2020_parquet"
+  FORMAT: "parquet"
+  BATCH_SIZE: 10000
+RUN:
+  FITTING: "dense"
+  MODELS:
+    ENABLED: ["OLS3_HUBER"]
+    FIT_INTERCEPT: true
+    STANDARDIZE: false
+    LINEAR_SOLVER:
+      MAX_ITER: 50000
+      TOL: 1.0e-8
+      INITIAL_STEP: 1.0
+    OLS3_HUBER:
+      FEATURES: ["mvel1", "bm", "mom12m"]
+      HUBER_QUANTILE: 0.999
+  REPORT_TABLE1_FIGURE3: true
+  OUTPUT_DIR: "results/gkx_ols3_huber_v1"

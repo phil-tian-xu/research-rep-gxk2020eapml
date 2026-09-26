@@ -45,6 +45,14 @@ class ExperimentLauncherTests(unittest.TestCase):
         self.assertTrue((folder / "research.yaml").exists())
         self.assertEqual(len(list((folder / "annual/configs").glob("*.yaml"))), 1)
 
+    def test_huber_commands_select_correct_model_and_full_sample(self):
+        for command, model in (("enet", "ENET_HUBER"), ("ols3", "OLS3_HUBER")):
+            folder = self.prepare(command, "--scrp", "2016", "full")
+            _, plan = load_plan(folder / "annual")
+            self.assertEqual(plan["config"]["RUN"]["MODELS"]["ENABLED"], [model])
+            self.assertEqual(plan["config"]["DATA"]["DATASET"], "gkx_parquet")
+            self.assertEqual(launcher.read_launch(folder)["model"], model)
+
     def test_sbatch_arguments_job_receipt_and_dependency(self):
         folder = self.prepare()
         with patch("run_experiment.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "397999;cluster\n", "")) as run:

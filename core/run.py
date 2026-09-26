@@ -55,6 +55,7 @@ def configured_specifications(settings):
         "OLS": LinearRegressor,
         "OLS_HUBER": LinearRegressor,
         "ENET_HUBER": LinearRegressor,
+        "OLS3_HUBER": LinearRegressor,
         "PCR": PCRRegressor,
         "PLS": PLSRegressor,
     }
@@ -81,9 +82,18 @@ def configured_specifications(settings):
                            "penalty_strength": 0.0}]
         elif name == "ENET_HUBER":
             enet = settings.ENET_HUBER
-            validate_huber_delta(enet.HUBER_DELTA)
+            quantile = enet.get("HUBER_QUANTILE")
+            if quantile is None:
+                validate_huber_delta(enet.HUBER_DELTA)
+            elif (enet.HUBER_DELTA is not None or isinstance(quantile, bool) or
+                  not np.isfinite(quantile) or not 0 < quantile < 1):
+                raise ValueError("ENET_HUBER requires either HUBER_DELTA or HUBER_QUANTILE in (0, 1).")
             candidates = [{**linear, "loss": "huber", "huber_delta": enet.HUBER_DELTA,
+                           "huber_quantile": quantile,
                            "rho": enet.RHO, "penalty_strength": strength} for strength in enet.PENALTY_GRID]
+        elif name == "OLS3_HUBER":
+            candidates = [{**linear, "loss": "huber", "huber_quantile": settings.OLS3_HUBER.HUBER_QUANTILE,
+                           "penalty_strength": 0.0}]
         elif name == "PCR":
             candidates = [{**common, "n_components": k} for k in settings.PCR.COMPONENT_GRID]
         else:
@@ -97,6 +107,8 @@ def configured_specifications(settings):
 
 def run(X, y, return_month, cfg, *, dataset_info=None, checkpoint_dir=None, stop_after_year=None):
     """Run in memory, or resume an initialized directory of model-year results."""
+    if "OLS3_HUBER" in cfg.RUN.MODELS.ENABLED:
+        raise ValueError("OLS3_HUBER requires the dense Parquet runner's explicit feature selection.")
     window = cfg.RUN.SPLIT
     if stop_after_year is None:
         stop_after_year = window.LAST_TEST_YEAR

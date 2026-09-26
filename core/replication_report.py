@@ -1,4 +1,4 @@
-"""Table 1 (All stocks) and Figure 3 (PCR/PLS) from saved annual checkpoints.
+"""Table 1 (All stocks) and Figure 3 (PCR/PLS/ENet) from annual checkpoints.
 
 No loading of the modeling panel, fitting, or resume compatibility check is needed:
 reporting can also inspect results produced by older execution code.
@@ -15,7 +15,8 @@ from core.run_state import atomic_write, load_run_config, read_checkpoints, reso
 
 
 # GKX (2020), Table 1, printed p. 2250: percentage R2, 1987-2016, full universe.
-PAPER_ALL_R2_PERCENT = {"OLS_HUBER": -3.46, "PLS": .27, "PCR": .26}
+PAPER_ALL_R2_PERCENT = {"OLS_HUBER": -3.46, "PLS": .27, "PCR": .26,
+                        "ENET_HUBER": .11, "OLS3_HUBER": .16}
 
 
 def report_tables(records, cfg):
@@ -91,9 +92,48 @@ def report_tables(records, cfg):
                                    "loss_above_best": candidate["validation_loss"] - scores[selected_index],
                                    "selected": index == selected_index})
             complexity.append(row)
+    for model in (name for name in models if name in {"ENET_HUBER", "OLS3_HUBER"}):
+        for year in years:
+            row = {"model": model, "test_year": year, "status": "pending",
+                   "nonzero_slopes": np.nan, "penalty_strength": np.nan,
+                   "huber_delta": np.nan, "validation_loss": np.nan,
+                   "at_grid_min": False, "at_grid_max": False}
+            if (year, model) in records:
+                tuning = records[year, model]["tuning"]
+                if "coefficients" not in tuning:
+                    # Earlier generic ENet runs saved predictions but no coefficient diagnostics.
+                    row["status"] = "diagnostics_unavailable"
+                    complexity.append(row)
+                    continue
+                candidates = tuning["validation_results"]
+                scores = np.asarray([c["validation_loss"] for c in candidates])
+                if not len(scores) or not np.isfinite(scores).all() or not all(c["converged"] for c in candidates):
+                    raise ValueError(f"Invalid Huber tuning results: {model}, {year}.")
+                selected = int(np.argmin(scores))
+                if candidates[selected]["params"] != tuning["best_params"]:
+                    raise ValueError(f"Selected parameters disagree with tuning scores: {model}, {year}.")
+                count = int(np.count_nonzero(tuning["coefficients"]))
+                if count != tuning["nonzero_slopes"] or len(tuning["coefficients"]) != len(tuning["feature_names"]):
+                    raise ValueError(f"Coefficient counts disagree: {model}, {year}.")
+                penalties = [c["params"]["penalty_strength"] for c in candidates]
+                penalty = penalties[selected]
+                row.update(status="complete", nonzero_slopes=count, penalty_strength=penalty,
+                           huber_delta=tuning["huber_delta"], validation_loss=float(scores[selected]),
+                           at_grid_min=penalty == min(penalties), at_grid_max=penalty == max(penalties))
+                for index, candidate in enumerate(candidates):
+                    curves.append({"model": model, "test_year": year,
+                                   "penalty_strength": penalties[index],
+                                   "nonzero_slopes": candidate["nonzero_slopes"],
+                                   "huber_delta": candidate["huber_delta"],
+                                   "iterations": candidate["iterations"], "stationarity": candidate["stationarity"],
+                                   "validation_loss": candidate["validation_loss"],
+                                   "loss_above_best": candidate["validation_loss"] - scores[selected],
+                                   "selected": index == selected})
+            complexity.append(row)
     return (pd.DataFrame(table), pd.DataFrame(complexity),
             pd.DataFrame(curves, columns=["model", "test_year", "requested_components", "fitted_components",
-                                         "validation_loss", "loss_above_best", "selected"]))
+                                         "validation_loss", "loss_above_best", "selected", "penalty_strength",
+                                         "nonzero_slopes", "huber_delta", "iterations", "stationarity"]))
 
 
 def plot_complexity(complexity, cfg, output):
@@ -102,7 +142,7 @@ def plot_complexity(complexity, cfg, output):
     import matplotlib.pyplot as plt
     from matplotlib.ticker import MaxNLocator
 
-    models = [name for name in ("PCR", "PLS") if name in cfg.RUN.MODELS.ENABLED]
+    models = [name for name in ("PCR", "PLS", "ENET_HUBER") if name in cfg.RUN.MODELS.ENABLED]
     if not models:
         return
     fig, axes = plt.subplots(len(models), 1, figsize=(10, 3.5 * len(models)),
@@ -110,6 +150,14 @@ def plot_complexity(complexity, cfg, output):
     axes = axes[:, 0]
     for ax, model in zip(axes, models):
         group = complexity[complexity.model == model] if not complexity.empty else pd.DataFrame()
+        if model == "ENET_HUBER":
+            if not group.empty:
+                ax.plot(group.test_year, group.nonzero_slopes, "o-", color="#246B8E", markersize=3)
+            ax.set_title(model, loc="left", fontweight="bold")
+            ax.set_ylabel("Nonzero slopes (excludes intercept)")
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+            ax.grid(alpha=.2)
+            continue
         if not group.empty:
             # Pending years remain NaN, which breaks lines instead of connecting gaps.
             ax.plot(group.test_year, group.fitted_components, "o-", color="#246B8E", markersize=3, label="Fitted components")
@@ -138,10 +186,20 @@ def plot_validation_curves(curves, output):
     import matplotlib.pyplot as plt
 
     for year, group in curves.groupby("test_year", sort=True):
-        models = [name for name in ("PCR", "PLS") if name in set(group.model)]
+        models = [name for name in ("PCR", "PLS", "ENET_HUBER") if name in set(group.model)]
+        if not models:
+            continue  # OLS-3+H has no penalty tuning.
         fig, axes = plt.subplots(1, len(models), figsize=(5 * len(models), 3.7),
                                  layout="constrained", squeeze=False)
         for ax, model in zip(axes[0], models):
+            if model == "ENET_HUBER":
+                points = group[group.model == model].sort_values("penalty_strength")
+                ax.semilogx(points.penalty_strength, points.loss_above_best, "o-")
+                best = points[points.selected]
+                ax.scatter(best.penalty_strength, best.loss_above_best, color="#BE5932", zorder=3)
+                ax.set(title=model, xlabel="Penalty strength", ylabel="Validation loss above best")
+                ax.grid(alpha=.2)
+                continue
             points = group[group.model == model].sort_values("requested_components")
             ax.plot(points.requested_components, points.loss_above_best, "o-", markersize=2, color="#246B8E")
             best = points[points.selected]
@@ -171,7 +229,8 @@ def make_report(run_dir):
                      "Table 1 uses the intersection of completed test years across all enabled models.\n"
                      "Reference values are from GKX Table 1, All row, full universe, 1987-2016.\n"
                      "Development subsamples, partial periods, and unverified settings are not exact replications.\n"
-                     "Figure 3 displays fitted components; missing years are gaps, not zeros.\n"
+                     "Figure 3 displays PCR/PLS components or ENet nonzero slopes (intercept excluded).\n"
+                     "Missing years are gaps, not zeros. OLS-3 has no tuned complexity plot.\n"
                      "Selected counts can change sharply when validation losses are nearly tied; inspect tuning curves.\n")
         manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
         atomic_write(output / "source_identity.json", json.dumps({"dataset": manifest["dataset"],

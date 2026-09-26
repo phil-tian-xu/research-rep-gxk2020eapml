@@ -11,6 +11,10 @@ from core.run_state import read_checkpoints, resolve_run_dir, run_lock, save_che
 
 
 def run_parquet(panel, cfg, *, checkpoint_dir, stop_after_year=None, memory_snapshot=None):
+    if list(cfg.RUN.MODELS.ENABLED) in (["ENET_HUBER"], ["OLS3_HUBER"]):
+        from core.dense_linear_run import run_parquet as run_linear
+        return run_linear(panel, cfg, checkpoint_dir=checkpoint_dir,
+                          stop_after_year=stop_after_year, memory_snapshot=memory_snapshot)
     split = cfg.RUN.SPLIT
     stop = split.LAST_TEST_YEAR if stop_after_year is None else stop_after_year
     if (isinstance(stop, bool) or not isinstance(stop, int) or

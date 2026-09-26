@@ -1,4 +1,4 @@
-"""One interface for local/SCRP PCR and PLS experiments. See docs/Running Experiments.md."""
+"""Local/SCRP PCR, PLS, ENet+H and OLS-3+H. See docs/Running Experiments.md."""
 
 import argparse
 from collections import Counter, defaultdict
@@ -21,7 +21,9 @@ from utils.general_utils import load_config
 
 
 ROOT = Path(__file__).resolve().parent
-BASELINES = {"pcr": "gkx_pcr_full_v5", "pls": "gkx_pls_p05_v1"}
+BASELINES = {"pcr": "gkx_pcr_full_v5", "pls": "gkx_pls_p05_v1",
+             "enet": "gkx_enet_huber_v1", "ols3": "gkx_ols3_huber_v1"}
+MODEL_NAMES = {"pcr": "PCR", "pls": "PLS", "enet": "ENET_HUBER", "ols3": "OLS3_HUBER"}
 SAMPLES = {"full": "gkx_parquet", "p05": "gkx_dev_p05_seed2020_parquet"}
 
 
@@ -73,8 +75,9 @@ def execution_options(args, previous=None):
             options[key] = value
     options.setdefault("parallel", 4 if args.scrp else 1)
     options.setdefault("cpus", 8)
-    options.setdefault("mem", "128G" if getattr(args, "command", "") == "pcr" else "192G")
-    options.setdefault("time", "02:00:00" if getattr(args, "command", "") == "pcr" else "12:00:00")
+    model = getattr(args, "command", "")
+    options.setdefault("mem", {"pcr": "128G", "ols3": "8G"}.get(model, "192G"))
+    options.setdefault("time", {"pcr": "02:00:00", "ols3": "01:00:00"}.get(model, "12:00:00"))
     options.setdefault("account", "pg")
     options.setdefault("partition", "scrp")
     options.setdefault("qos", "c32g4")
@@ -97,7 +100,7 @@ def prepare_experiment(args, argv):
         raise ValueError("Run --scrp on the SCRP login node with sbatch available. No SSH submission is performed.")
     config_name = args.config or BASELINES[args.command]
     cfg = load_config(config_name)
-    if list(cfg.RUN.MODELS.ENABLED) != [args.command.upper()]:
+    if list(cfg.RUN.MODELS.ENABLED) != [MODEL_NAMES[args.command]]:
         raise ValueError("The research config must enable only the requested model.")
     cfg.DATA.DATASET = SAMPLES[args.sample]
     if not (DATASET_PATHS[cfg.DATA.DATASET] / "metadata.json").is_file():
@@ -111,7 +114,7 @@ def prepare_experiment(args, argv):
     # This resolved input and generated annual configs live with results, not config/.
     atomic_write(folder / "research.yaml", cfg.dump())
     prepare(str((folder / "research").resolve()), first, last, folder / "annual")
-    record = {"schema_version": 1, "id": run_id, "model": args.command.upper(),
+    record = {"schema_version": 1, "id": run_id, "model": MODEL_NAMES[args.command],
               "sample": args.sample, "years": [first, last], "baseline_config": config_name,
               "backend": "scrp" if args.scrp else "local", "created_utc": timestamp(),
               "command": [sys.executable, str(Path(__file__).resolve()), *argv],
@@ -316,7 +319,7 @@ def list_experiments(root, refresh=False):
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("pcr", "pls", "resume"):
+    for name in (*BASELINES, "resume"):
         cmd = commands.add_parser(name)
         if name == "resume":
             cmd.add_argument("experiment", help="Saved experiment ID or directory.")
@@ -331,8 +334,8 @@ def parser():
         cmd.add_argument("--root", help="Results root; otherwise GKX_EXPERIMENT_ROOT or the site default.")
         cmd.add_argument("--parallel", type=int, help="Maximum concurrent Slurm annual jobs (default 4); local uses 1.")
         cmd.add_argument("--cpus", type=int, help="CPUs/BLAS threads per annual task (default 8).")
-        cmd.add_argument("--mem", help="RAM per Slurm task, e.g. 128G; PCR default 128G, PLS 192G.")
-        cmd.add_argument("--time", help="Slurm task time limit; PCR default 02:00:00, PLS 12:00:00.")
+        cmd.add_argument("--mem", help="RAM/task: PCR 128G, PLS/ENet 192G, OLS-3 8G; initial allocations.")
+        cmd.add_argument("--time", help="Time/task: PCR 02:00:00, PLS/ENet 12:00:00, OLS-3 01:00:00.")
         for key in ("account", "partition", "qos"):
             cmd.add_argument(f"--{key}", help="Override the SCRP deployment default.")
         cmd.add_argument("--after", help="Start after this entire Slurm job/array ends, even if it fails.")

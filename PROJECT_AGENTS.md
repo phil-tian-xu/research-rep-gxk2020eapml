@@ -55,6 +55,31 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+ENet+H / OLS-3+H additions (2026-09-26): `run_experiment.py enet/ols3`
+uses `gkx_enet_huber_v1` / `gkx_ols3_huber_v1`; sample and years remain CLI choices.
+Dense annual fitting is in `core/dense_linear_run.py`, dispatched by the existing
+Parquet runner. Original LinearRegressor/APG retained; no batch QR or method change.
+ENet uses rho=.5, ten log-spaced penalties 1e-4..1e-1 (explicit pilot choice).
+Both use the approved training-only OLS absolute-residual .999 quantile, computed
+once per year and fixed across penalty candidates. OLS-3 reads only ranked
+mvel1/bm/mom12m. Intercept enabled, no additional scaling, MSE validation, no refit.
+Saves selected coefficients/intercept/features, actual threshold, every candidate's
+convergence diagnostics, penalty and nonzero slope count. Figure 3 now supports
+ENet nonzero slopes; OLS-3 has no tuned-complexity plot. Reports/annual checkpoints
+and list/resume/collect share the existing workflow. See the primary run guide and
+`docs/working_notes/Huber Linear Workflows.md` for settings and limitations.
+Phil reports PCR finished and PLS running on SCRP. Keep that PLS checkout
+unchanged while queued/running/resumable jobs need it; source hashes change with
+these additions. No remote jobs were submitted or modified during implementation.
+Verification: 171 tests passed, including independent SciPy Huber/SLSQP solutions,
+feature projection/order, shared training-only delta, staged/complete equivalence,
+resume skipping, nonconvergence rejection and launcher/report integration.
+Real 1987 fixed-5% launcher runs completed and collected:
+`enet_p05_1987-1987_20260926T072037893220Z`: lambda=.01, 11 nonzero slopes,
+R2=.523733%, peak Python RAM=.641 GiB, worker elapsed190.15s;
+`ols3_p05_1987-1987_20260926T072039517817Z`: R2=.345153%, peak=.140 GiB,
+worker elapsed1.74s. These are one-year pilot checks, not full-sample results.
+
 Unified interface: `run_experiment.py pcr/pls --local/--scrp --sample p05/full
 --years FIRST:LAST`, plus `list [--refresh]`, `resume ID`, and `collect ID`.
 Uses existing baselines PCR=v5 and PLS=p05_v1; writes all resolved/year configs
@@ -70,8 +95,12 @@ fixed 5% sample: PCR R2=0.463759%, PLS R2=0.581663%; both produced combined
 reports and discoverable launch records under `results/experiments/`.
 Verification: 165 tests passed, including mocked Slurm submission/accounting,
 retry protection, preserved settings and listing. Real PCR resume recognized its
-completed checkpoint without refitting. Live SCRP submission through this new
-wrapper remains for Phil to verify.
+completed checkpoint without refitting. Phil confirmed deployment and submission
+of full PCR 1987-2016 as Slurm job 397900, experiment
+`pcr_full_1987-2016_20260925T182454226202Z`; completion is not yet verified.
+`docs/Running Experiments.md` now starts with a daily command reference using
+that real job: status/accounting, job-to-experiment lookup, logs, peak RAM,
+collection, retries and cancellation. Keep this as the primary run guide.
 
 Independent annual tasks (2026-09-26): `core.annual_jobs prepare/run/collect`
 and `run_annual_scrp.sh` reuse main/model/loading code unchanged. Preparation

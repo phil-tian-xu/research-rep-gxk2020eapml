@@ -20,15 +20,19 @@ class PanelBatch:
     return_month: np.ndarray
 
 
-def load_window(panel, first_year, last_year):
+def load_window(panel, first_year, last_year, *, feature_columns=None):
     """Fill ordinary arrays from Parquet pieces; return the complete window."""
     window = panel.window(first_year, last_year)
-    X = np.empty((window.n_rows, len(panel.features)), dtype=np.float64)
+    selected = panel.features if feature_columns is None else list(feature_columns)
+    if not selected or len(selected) != len(set(selected)) or not set(selected) <= set(panel.features):
+        raise ValueError("Select unique feature columns present in the panel.")
+    X = np.empty((window.n_rows, len(selected)), dtype=np.float64)
     y = np.empty(window.n_rows, dtype=np.float64)
     positions = np.empty(window.n_rows, dtype=np.int64)
     months = np.empty(window.n_rows, dtype="U7")
     start = 0
-    for batch in window.batches():
+    batches = window.batches() if feature_columns is None else window.batches(feature_columns=selected)
+    for batch in batches:
         end = start + len(batch.y)
         X[start:end], y[start:end] = batch.X, batch.y
         positions[start:end], months[start:end] = batch.row_position, batch.return_month
@@ -101,13 +105,17 @@ class YearWindow:
         if not self.n_rows:
             raise ValueError(f"No observations in return years {first_year}-{last_year}.")
 
-    def batches(self, *, features=True):
+    def batches(self, *, features=True, feature_columns=None):
         m = self.panel.metadata
+        selected = self.panel.features if feature_columns is None else list(feature_columns)
+        if feature_columns is not None and (not features or not selected or
+                len(selected) != len(set(selected)) or not set(selected) <= set(self.panel.features)):
+            raise ValueError("Select unique feature columns present in the panel.")
         target, date, feature_date, position = (m[k] for k in
             ("target_column", "return_month_column", "feature_month_column", "row_position_column"))
         columns = [target, date, feature_date, position]
         if features:
-            columns += self.panel.features
+            columns += selected
         # Converted parts follow CSV order. Positions within each year must be
         # strictly increasing, even if the source interleaves different years.
         previous_by_year = {}
@@ -115,7 +123,7 @@ class YearWindow:
             path = self.panel.verify_part(part)
             count = 0
             with pq.ParquetFile(path) as parquet:
-                numeric = [target] + (self.panel.features if features else [])
+                numeric = [target] + (selected if features else [])
                 if any(parquet.schema_arrow.field(c).type != pa.float64() for c in numeric):
                     raise ValueError(f"Model columns must be float64: {path}")
                 if parquet.schema_arrow.field(position).type != pa.int64():
@@ -137,7 +145,7 @@ class YearWindow:
                         raise ValueError(f"Invalid/duplicate source row positions: {path}")
                     previous_by_year[part["return_year"]] = int(positions[-1])
                     y = frame[target].to_numpy(dtype=np.float64, copy=True)
-                    X = frame[self.panel.features].to_numpy(dtype=np.float64, copy=True) if features else None
+                    X = frame[selected].to_numpy(dtype=np.float64, copy=True) if features else None
                     if not np.isfinite(y).all() or (features and not np.isfinite(X).all()):
                         raise ValueError(f"Nonfinite model values: {path}")
                     labels = months.astype(str).to_numpy()

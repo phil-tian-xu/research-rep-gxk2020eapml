@@ -1,7 +1,281 @@
 # Running experiments
 
+## Daily command reference: your PCR job 397900
+
+This section uses Phil's actual submission on 2026-09-26 (Hong Kong time).
+Submission was confirmed; completion is not assumed. Commands here run in
+**Bash on SCRP**, not Windows PowerShell. Re-enter these variables after logging
+in again. For another run, replace the experiment ID, job ID and date.
+
+```bash
+cd ~/research-rep-gxk2020eapml
+exp_id="pcr_full_1987-2016_20260925T182454226202Z"
+experiment="/data/users/s1155269217/GKX2020/results/experiments/$exp_id"
+job=397900
+since=2026-09-25
+```
+
+Experiment names contain UTC timestamps, so the date can differ from the local
+date. `since` starts before submission and prevents historical accounting queries
+from missing the run after midnight. A retry gets a new Slurm job ID but retains
+the experiment directory.
+
+| Need | Command |
+| --- | --- |
+| Find experiments | `.venv/bin/python -B run_experiment.py list` |
+| Also query Slurm | `.venv/bin/python -B run_experiment.py list --refresh` |
+| Check this array now | `squeue -r -j "$job" -o "%.20i %.10T %.10M %R"` |
+| Check finished jobs | Use `sacct` below |
+| See the current stage | Read the task's `run.log` below |
+| Build Table 1/Figure 3 results | `.venv/bin/python -B run_experiment.py collect "$experiment"` |
+| Retry unfinished years | `.venv/bin/python -B run_experiment.py resume "$experiment"` |
+
+### Start a new experiment
+
+The command that submitted job **397900** was:
+
+```bash
+.venv/bin/python -B run_experiment.py pcr --scrp --sample full \
+  --years 1987:2016 --parallel 4 --cpus 8 --mem 128G
+```
+
+The returned identifiers were:
+
+```text
+ID: pcr_full_1987-2016_20260925T182454226202Z
+Submitted job 397900
+Experiment: /data/users/s1155269217/GKX2020/results/experiments/pcr_full_1987-2016_20260925T182454226202Z
+```
+
+**Do not repeat this command just to check or continue the run:** it creates a
+new experiment. Use `list`, `resume` or `collect` for existing experiments.
+Local checks and PLS examples are in the settings section below.
+
+### Find results when only the job ID is remembered
+
+```bash
+.venv/bin/python -B run_experiment.py list
+```
+
+The job ID appears in `job_ids`. The directory is the printed results root plus
+the experiment ID. To look up an exact job ID directly from saved records:
+
+```bash
+.venv/bin/python - "$job" <<'PY'
+import json
+import sys
+from run_experiment import results_root
+
+matches = []
+for path in results_root().glob("*/launch.json"):
+    record = json.loads(path.read_text())
+    if any(s.get("job_id") == sys.argv[1] for s in record["submissions"]):
+        matches.append(path.parent)
+for path in matches:
+    print(path)
+if not matches:
+    print("No unified-launcher record for this job in the configured results root.")
+PY
+```
+
+This searches all recorded submissions, including retries. Legacy jobs launched
+outside this interface are not included. For jobs still known to Slurm,
+`scontrol show job 397900_0` can show the working directory, command and stdout
+path. Slurm's live job record can disappear after completion.
+
+### Is the job running, waiting, or finished?
+
+```bash
+# All my jobs, including other experiments
+squeue -u "$USER" -o "%.20i %.10T %.12q %.10m %R"
+
+# One row per annual task; full pending reason
+squeue -r -j "$job" -o "%.20i %.10T %.10M %R"
+
+# Refresh every 30 seconds; Ctrl+C stops watching, not the jobs
+squeue -r -j "$job" -o "%.20i %.10T %.10M %R" --iterate=30
+
+# Historical status, including completed/failed tasks; omit step rows
+sacct -X -j "$job" --starttime "$since" \
+  --format=JobID%22,State%24,ExitCode,Elapsed
+
+# Check just tasks 0 and 1, including their steps
+sacct -j "${job}_0,${job}_1" --starttime "$since" \
+  --format=JobID%22,State%24,ExitCode,Elapsed
+```
+
+| Status | Meaning / next step |
+| --- | --- |
+| `PENDING` | Queued; read the reason column |
+| `RUNNING` | Allocated and executing |
+| `COMPLETING` | Slurm is cleaning up the task |
+| `COMPLETED`, `0:0` | Process succeeded; collect and validate research outputs |
+| `FAILED` | Inspect the worker log and exit code |
+| `OUT_OF_MEMORY` | Inspect measured memory and requested allocation |
+| `TIMEOUT` | The requested time limit was reached |
+| `CANCELLED` | Cancelled; saved annual checkpoints remain |
+| Empty queue / invalid job ID | Use `sacct`; absence does not prove success |
+
+For **this 1987–2016 experiment**, task 0 is 1987, task 1 is 1988, task 22 is
+2009, and task 29 is 2016. All 30 tasks need to finish. `.batch` and `.extern`
+rows are job steps, not additional test years. The mapping is saved in
+`annual/experiment.json`; the earlier eight-year experiment had a different mapping.
+
+### Print the log and see the current stage
+
+```bash
+# For this experiment task 0 is 1987; use task=29 for 2016
+task=0
+
+# Locate the log without guessing the internal child job ID
+find "$experiment/annual/logs" -type f \
+  -path "*/${job}_${task}_*/run.log" -print
+
+# Last 80 lines
+tail -n 80 "$experiment"/annual/logs/"${job}_${task}_"*/run.log
+
+# Follow output; Ctrl+C only stops following
+tail -f "$experiment"/annual/logs/"${job}_${task}_"*/run.log
+```
+
+Progress messages include `Loading complete training window`, `Fitting`,
+`Loading validation`, and `Saved; selected K=...; test R2=...`. A long gap during
+SVD fitting is possible; there is no within-fit percentage indicator.
+`Completed 1/1 model-years` refers to one annual task, not the entire array.
+
+Pending tasks normally have no worker log yet. If a task started/failed before
+creating `run.log`, check its scheduler stdout for an early launcher error:
+
+```bash
+find "$experiment/submissions" -type f -name "slurm-${job}_${task}.out" -print
+tail -n 80 "$experiment"/submissions/*/"slurm-${job}_${task}.out"
+```
+
+For the original submission, task 0's exact scheduler stdout path is:
+
+```text
+/data/users/s1155269217/GKX2020/results/experiments/pcr_full_1987-2016_20260925T182454226202Z/submissions/20260925T182454778708Z/slurm-397900_0.out
+```
+
+An empty scheduler stdout file can be normal because the launcher redirects
+Python output into `annual/logs/.../run.log`. After a retry use its **new job ID**.
+If a pattern matches several files, inspect the paths individually. A wildcard
+"no such file" error means that log does not exist yet; verify task status and ID.
+
+### Check peak RAM and elapsed time
+
+After the selected task ends:
+
+```bash
+cat "$experiment"/annual/logs/"${job}_${task}_"*/time.txt
+
+# Keep .batch/step rows here: MaxRSS is commonly recorded on those rows
+sacct -j "$job" --starttime "$since" \
+  --format=JobID%22,State%24,Elapsed,AllocCPUS,ReqMem,MaxRSS,ExitCode
+```
+
+GNU time's `Maximum resident set size (kbytes)` is an observed process peak.
+Divide by **1,048,576** to obtain GiB on this Linux system: 100,952,100 KiB is
+about 96.275 GiB. `ReqMem` is requested RAM, not actual use. Slurm MaxRSS is
+accounting data and may differ from GNU time or be unavailable; blank is not zero.
+GNU time's final summary may not exist until the task ends. Live worker logs
+also print `[memory] ... MAX SO FAR=...`.
+
+### Collect and read Table 1/Figure 3 outputs
+
+After all tasks have ended and their checkpoints are saved:
+
+```bash
+.venv/bin/python -B run_experiment.py collect "$experiment"
+
+# Pooled Table 1 R2
+cat "$experiment/annual/combined/table1_all.csv"
+
+# Annual R2, losses and sample sizes
+head -n 12 "$experiment/annual/combined/annual_metrics.csv"
+
+# Requested and fitted component counts over time
+cat "$experiment/annual/combined/complexity.csv"
+
+# Recorded per-year peak RAM and timing
+cat "$experiment/annual/task_summary.csv"
+```
+
+Figure 3 is saved as `annual/combined/figure3_complexity.png` and `.svg`.
+Use MobaXterm's SFTP browser to download/open the PNG. Validation diagnostics are
+in `tuning_curves.csv` and `validation_YEAR.png`. Pooled R2 uses all test
+observations; it is not an average of annual R2.
+
+Collection refuses missing/incompatible years. If it reports missing years,
+inspect `task_summary.csv` before resuming. `reports=pending` is normal before
+collection. `last_action=submitted` records the launch action, not current job
+state; use `--refresh` or `sacct` for scheduler status.
+
+### Retry or cancel
+
+Wait until the experiment's recorded submissions have no queued/running tasks:
+
+```bash
+.venv/bin/python -B run_experiment.py resume "$experiment"
+```
+
+If the evidence calls for more resources, use this **instead**:
+
+```bash
+.venv/bin/python -B run_experiment.py resume "$experiment" \
+  --mem 192G --time 04:00:00 --parallel 2
+```
+
+Completed checkpoints are retained; only missing years are submitted. The new
+job ID is added to `launch.json`. Keep the original code and environment for
+resume. To cancel deliberately, choose **one** of these alternatives:
+
+```bash
+# Cancel one task (1987 in this example)
+scancel "${job}_0"
+
+# Cancel the entire array
+scancel "$job"
+```
+
+Cancellation retains saved checkpoints but interrupts the current unsaved fit.
+Do not cancel a healthy full run simply because other jobs are waiting for RAM.
+For `QOSMaxMemoryPerUser`, inspect allocations and quota:
+
+```bash
+squeue -u "$USER" -o "%.20i %.10T %.12q %.10m %R"
+sacctmgr -P show qos c32g4 format=Name,MaxTRESPU
+```
+
+Requested allocations count against the per-user limit, regardless of idle RAM
+elsewhere in the cluster. Eight workers in one job still need their combined RAM.
+
+### Tomorrow's short routine
+
+After setting the variables at the top:
+
+```bash
+.venv/bin/python -B run_experiment.py list --refresh
+sacct -X -j "$job" --starttime "$since" --format=JobID%22,State%24,ExitCode,Elapsed
+```
+
+If tasks failed, read their logs and address the cause before resuming. If all
+30 annual tasks succeeded and their checkpoints are saved:
+
+```bash
+.venv/bin/python -B run_experiment.py collect "$experiment"
+cat "$experiment/annual/combined/table1_all.csv"
+cat "$experiment/annual/combined/complexity.csv"
+```
+
+References: [SCRP guide](https://scrp.econ.cuhk.edu.hk/guide/slurm),
+[squeue](https://slurm.schedmd.com/squeue.html),
+[sacct](https://slurm.schedmd.com/sacct.html).
+
+## Launcher settings and background
+
 Use the project Python environment. `run_experiment.py` is the normal interface
-for **new PCR and PLS experiments**. It prepares annual configurations inside
+for **new PCR, PLS, ENet+H and OLS-3+H experiments**. It prepares annual configurations inside
 the result directory and reuses the existing complete-array fitting workflow.
 No server-only YAML, model-specific batch script, or manual array-index calculation
 is needed. Run commands from the repository directory.
@@ -11,6 +285,8 @@ is needed. Run commands from the repository directory.
 ```powershell
 python -B run_experiment.py pcr --local --sample p05 --years 1987:1988
 python -B run_experiment.py pls --local --sample p05 --years 1987:1988
+python -B run_experiment.py enet --local --sample p05 --years 1987:1988
+python -B run_experiment.py ols3 --local --sample p05 --years 1987:1988
 python -B run_experiment.py list
 ```
 
@@ -23,6 +299,12 @@ multiprocessing pool; local runs require `--parallel 1`.
 
 ## SCRP
 
+**Deployment note for the Huber additions:** Phil's PCR run is reported finished
+and PLS is running. Do not update the checkout used by queued/running PLS tasks.
+The new execution code changes source hashes. Finish/collect the existing run
+using its original checkout, or deploy new methods in a separate checkout.
+Ordinary resume intentionally refuses execution-code changes.
+
 Run the command **on SCRP**, using `.venv/bin/python`. The wrapper calls `sbatch`
 and records the response; it does not use SSH or fit models on the login node.
 The existing generic Bash script executes the annual Python worker on compute
@@ -34,6 +316,29 @@ Full PCR replication:
 .venv/bin/python -B run_experiment.py pcr --scrp --sample full --years 1987:2016 \
   --parallel 4 --cpus 8 --mem 128G
 ```
+
+ENet+H and OLS-3+H: first benchmark the largest annual window individually.
+These are initial resource requests, not measured full-sample requirements:
+
+ENet defaults to 192G/12 hours per task; OLS-3 defaults to 8G/1 hour. Both
+inherit the launcher default of four concurrent SCRP tasks, so specify
+`--parallel 1` explicitly for the first resource check.
+
+```bash
+.venv/bin/python -B run_experiment.py enet --scrp --sample full --years 2016 \
+  --parallel 1 --cpus 8 --mem 192G --time 12:00:00
+.venv/bin/python -B run_experiment.py ols3 --scrp --sample full --years 2016 \
+  --parallel 1 --cpus 8 --mem 8G --time 01:00:00
+```
+
+After checking convergence, memory and runtime, use `--years 1987:2016` for a
+fresh full-horizon experiment. `list`, `resume` and `collect` work identically
+for all four methods. ENet produces `complexity.csv` and
+`figure3_complexity.png` with nonzero slope counts, plus penalty validation
+curves. OLS-3 has no tuned-complexity figure. Both produce pooled Table 1 and
+annual metrics; coefficients and diagnostics are saved in each annual checkpoint
+and run's `tuning_history.json`. See [Huber linear workflows](working_notes/Huber%20Linear%20Workflows.md)
+for exact settings and interpretation.
 
 PLS largest-window resource check, optionally queued after the current PCR array:
 

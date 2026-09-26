@@ -1,0 +1,26 @@
+# Pilot: original dense Huber + ENet, fixed 5% sample. Launcher can select full.
+GENERAL:
+  NAME: "gkx_enet_huber_v1"
+  TASK_TYPE: "run"
+DATA:
+  DATASET: "gkx_dev_p05_seed2020_parquet"
+  FORMAT: "parquet"
+  BATCH_SIZE: 10000
+RUN:
+  FITTING: "dense"
+  MODELS:
+    ENABLED: ["ENET_HUBER"]
+    FIT_INTERCEPT: true
+    STANDARDIZE: false
+    LINEAR_SOLVER:
+      MAX_ITER: 50000
+      TOL: 1.0e-8
+      INITIAL_STEP: 1.0
+    ENET_HUBER:
+      HUBER_DELTA: null
+      HUBER_QUANTILE: 0.999
+      RHO: 0.5
+      # Ten log-spaced values including endpoints; grid density is our choice.
+      PENALTY_GRID: [0.0001, 0.00021544346900318845, 0.00046415888336127773, 0.001, 0.002154434690031882, 0.004641588833612777, 0.01, 0.021544346900318822, 0.046415888336127774, 0.1]
+  REPORT_TABLE1_FIGURE3: true
+  OUTPUT_DIR: "results/gkx_enet_huber_v1"
