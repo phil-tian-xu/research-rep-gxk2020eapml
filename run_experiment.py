@@ -22,8 +22,8 @@ from utils.general_utils import load_config
 
 ROOT = Path(__file__).resolve().parent
 BASELINES = {"pcr": "gkx_pcr_full_v5", "pls": "gkx_pls_p05_v1",
-             "enet": "gkx_enet_huber_v1", "ols3": "gkx_ols3_huber_v1"}
-MODEL_NAMES = {"pcr": "PCR", "pls": "PLS", "enet": "ENET_HUBER", "ols3": "OLS3_HUBER"}
+             "enet": "gkx_enet_huber_v1", "ols3": "gkx_ols3_huber_v1", "glm": "gkx_glm_huber_v1"}
+MODEL_NAMES = {"pcr": "PCR", "pls": "PLS", "enet": "ENET_HUBER", "ols3": "OLS3_HUBER", "glm": "GLM_HUBER"}
 SAMPLES = {"full": "gkx_parquet", "p05": "gkx_dev_p05_seed2020_parquet"}
 
 

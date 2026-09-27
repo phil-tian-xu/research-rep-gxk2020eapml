@@ -1,0 +1,29 @@
+# Approved empirical adaptations; see docs/working_notes/GLM Huber Workflow.md.
+GENERAL:
+  NAME: "gkx_glm_huber_v1"
+  TASK_TYPE: "run"
+DATA:
+  DATASET: "gkx_dev_p05_seed2020_parquet"
+  FORMAT: "parquet"
+  BATCH_SIZE: 10000
+RUN:
+  FITTING: "dense"
+  MODELS:
+    ENABLED: ["GLM_HUBER"]
+    # GLM-specific intercept/scaling conventions below take precedence.
+    LINEAR_SOLVER:
+      MAX_ITER: 50000
+      TOL: 1.0e-8
+      INITIAL_STEP: 1.0
+    GLM_HUBER:
+      CENTERING: "training"
+      INTERCEPT: "training_mean"
+      DUMMY_PREFIX: "sic2_"
+      KNOT_PROBABILITIES: [0.0, 0.25, 0.5, 0.75]
+      HUBER_QUANTILE: 0.999
+      TUNING: "squared_then_huber"
+      OBJECTIVE: "mean_half_loss"
+      # Ten log-spaced penalties: grid density and normalization are pilot choices.
+      PENALTY_GRID: [0.0001, 0.00021544346900318845, 0.00046415888336127773, 0.001, 0.002154434690031882, 0.004641588833612777, 0.01, 0.021544346900318822, 0.046415888336127774, 0.1]
+  REPORT_TABLE1_FIGURE3: true
+  OUTPUT_DIR: "results/gkx_glm_huber_v1"

@@ -16,7 +16,7 @@ from core.run_state import atomic_write, load_run_config, read_checkpoints, reso
 
 # GKX (2020), Table 1, printed p. 2250: percentage R2, 1987-2016, full universe.
 PAPER_ALL_R2_PERCENT = {"OLS_HUBER": -3.46, "PLS": .27, "PCR": .26,
-                        "ENET_HUBER": .11, "OLS3_HUBER": .16}
+                        "ENET_HUBER": .11, "OLS3_HUBER": .16, "GLM_HUBER": .19}
 
 
 def report_tables(records, cfg):
@@ -92,10 +92,10 @@ def report_tables(records, cfg):
                                    "loss_above_best": candidate["validation_loss"] - scores[selected_index],
                                    "selected": index == selected_index})
             complexity.append(row)
-    for model in (name for name in models if name in {"ENET_HUBER", "OLS3_HUBER"}):
+    for model in (name for name in models if name in {"ENET_HUBER", "OLS3_HUBER", "GLM_HUBER"}):
         for year in years:
             row = {"model": model, "test_year": year, "status": "pending",
-                   "nonzero_slopes": np.nan, "penalty_strength": np.nan,
+                   "nonzero_slopes": np.nan, "active_groups": np.nan, "penalty_strength": np.nan,
                    "huber_delta": np.nan, "validation_loss": np.nan,
                    "at_grid_min": False, "at_grid_max": False}
             if (year, model) in records:
@@ -113,7 +113,19 @@ def report_tables(records, cfg):
                 if candidates[selected]["params"] != tuning["best_params"]:
                     raise ValueError(f"Selected parameters disagree with tuning scores: {model}, {year}.")
                 count = int(np.count_nonzero(tuning["coefficients"]))
-                if count != tuning["nonzero_slopes"] or len(tuning["coefficients"]) != len(tuning["feature_names"]):
+                expected_columns = len(tuning["feature_names"])
+                if model == "GLM_HUBER":
+                    sizes = tuning["spline_state"]["group_sizes"]
+                    expected_columns = sum(sizes)
+                    if len(sizes) != len(tuning["feature_names"]) or any(size not in (1, 5) for size in sizes):
+                        raise ValueError("Invalid GLM spline groups.")
+                    boundaries = np.r_[0, np.cumsum(sizes)]
+                    coefficients = np.asarray(tuning["coefficients"])
+                    active = sum(int(np.any(coefficients[a:b] != 0)) for a, b in zip(boundaries[:-1], boundaries[1:]))
+                    if active != tuning["active_groups"] or not tuning["converged"]:
+                        raise ValueError("Invalid GLM final group count/convergence.")
+                    row["active_groups"] = active
+                if count != tuning["nonzero_slopes"] or len(tuning["coefficients"]) != expected_columns:
                     raise ValueError(f"Coefficient counts disagree: {model}, {year}.")
                 penalties = [c["params"]["penalty_strength"] for c in candidates]
                 penalty = penalties[selected]
@@ -124,6 +136,7 @@ def report_tables(records, cfg):
                     curves.append({"model": model, "test_year": year,
                                    "penalty_strength": penalties[index],
                                    "nonzero_slopes": candidate["nonzero_slopes"],
+                                   "active_groups": candidate.get("active_groups", np.nan),
                                    "huber_delta": candidate["huber_delta"],
                                    "iterations": candidate["iterations"], "stationarity": candidate["stationarity"],
                                    "validation_loss": candidate["validation_loss"],
@@ -133,7 +146,7 @@ def report_tables(records, cfg):
     return (pd.DataFrame(table), pd.DataFrame(complexity),
             pd.DataFrame(curves, columns=["model", "test_year", "requested_components", "fitted_components",
                                          "validation_loss", "loss_above_best", "selected", "penalty_strength",
-                                         "nonzero_slopes", "huber_delta", "iterations", "stationarity"]))
+                                         "nonzero_slopes", "active_groups", "huber_delta", "iterations", "stationarity"]))
 
 
 def plot_complexity(complexity, cfg, output):
@@ -142,7 +155,7 @@ def plot_complexity(complexity, cfg, output):
     import matplotlib.pyplot as plt
     from matplotlib.ticker import MaxNLocator
 
-    models = [name for name in ("PCR", "PLS", "ENET_HUBER") if name in cfg.RUN.MODELS.ENABLED]
+    models = [name for name in ("PCR", "PLS", "ENET_HUBER", "GLM_HUBER") if name in cfg.RUN.MODELS.ENABLED]
     if not models:
         return
     fig, axes = plt.subplots(len(models), 1, figsize=(10, 3.5 * len(models)),
@@ -150,11 +163,12 @@ def plot_complexity(complexity, cfg, output):
     axes = axes[:, 0]
     for ax, model in zip(axes, models):
         group = complexity[complexity.model == model] if not complexity.empty else pd.DataFrame()
-        if model == "ENET_HUBER":
+        if model in {"ENET_HUBER", "GLM_HUBER"}:
             if not group.empty:
-                ax.plot(group.test_year, group.nonzero_slopes, "o-", color="#246B8E", markersize=3)
+                values = group.active_groups if model == "GLM_HUBER" else group.nonzero_slopes
+                ax.plot(group.test_year, values, "o-", color="#246B8E", markersize=3)
             ax.set_title(model, loc="left", fontweight="bold")
-            ax.set_ylabel("Nonzero slopes (excludes intercept)")
+            ax.set_ylabel("Active input groups" if model == "GLM_HUBER" else "Nonzero slopes (excludes intercept)")
             ax.yaxis.set_major_locator(MaxNLocator(integer=True))
             ax.grid(alpha=.2)
             continue
@@ -186,13 +200,13 @@ def plot_validation_curves(curves, output):
     import matplotlib.pyplot as plt
 
     for year, group in curves.groupby("test_year", sort=True):
-        models = [name for name in ("PCR", "PLS", "ENET_HUBER") if name in set(group.model)]
+        models = [name for name in ("PCR", "PLS", "ENET_HUBER", "GLM_HUBER") if name in set(group.model)]
         if not models:
             continue  # OLS-3+H has no penalty tuning.
         fig, axes = plt.subplots(1, len(models), figsize=(5 * len(models), 3.7),
                                  layout="constrained", squeeze=False)
         for ax, model in zip(axes[0], models):
-            if model == "ENET_HUBER":
+            if model in {"ENET_HUBER", "GLM_HUBER"}:
                 points = group[group.model == model].sort_values("penalty_strength")
                 ax.semilogx(points.penalty_strength, points.loss_above_best, "o-")
                 best = points[points.selected]

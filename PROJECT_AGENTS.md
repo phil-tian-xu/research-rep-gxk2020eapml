@@ -64,6 +64,30 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+GLM+H empirical pilot (2026-09-27): `run_experiment.py glm --local --sample p05
+--years 1987 --cpus 8` uses `gkx_glm_huber_v1`. Phil approved training-only spline
+centering/scaling, singleton SIC groups, fixed training-mean intercept and squared
+penalty selection followed by Huber refinement. Threshold uses original-input
+training OLS absolute residual .999 quantile. Objective is mean half-loss plus
+unweighted group norms; ten penalties 1e-4..1e-1, an explicit pilot convention.
+`core/models/glm.py` / `core/dense_glm_run.py` preserve complete annual arrays,
+save transforms/coefficients/convergence, support annual resume and report active
+input groups for Figure 3 and zero-benchmark R2 for Table 1. No cluster submission
+or real-panel GLM fit performed; Phil will run the 5% check. See
+`docs/working_notes/GLM Huber Workflow.md`. Existing remote checkouts must stay
+unchanged while jobs need their execution hashes. Progress tracker is Phil-only.
+
+GLM reference comparison (2026-09-27): `python -B -m core.data_examine.glm_matlab
+prepare` creates small shared synthetic MAT inputs and Python reference outputs.
+The saved `run_glm_reference.m` calls the authors' original Simu_Matlab functions;
+`compare --run-dir PATH` checks intermediate transforms, tuning, coefficients,
+objectives, and predictions and writes comparison.json/csv. This reproduces
+simulation conventions, including separate evaluation centering and summed loss;
+it is not an approved empirical GLM specification or integrated production model.
+Python numerical checks passed. Phil ran MATLAB R2026b; saved reference_v1
+comparison passed all checks, with Huber test predictions within 4.45e-16.
+See `docs/working_notes/GLM MATLAB Comparison.md`. Keep existing runs unchanged.
+
 AI Hub deployment preparation (2026-09-27): `run_experiment.py --aihub` uses
 the separate `run_annual_aihub.sh`, backend record and default root
 `results/aihub_experiments/`. Use `--aihub` for list/resume/collect ID lookup too.

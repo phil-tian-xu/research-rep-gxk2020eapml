@@ -29,8 +29,8 @@ def prepare(config, first_year, last_year, output):
         raise ValueError("Requested years must be within the base configuration's test horizon.")
     if cfg.DATA.get("FORMAT") != "parquet" or cfg.RUN.get("FITTING") != "dense":
         raise ValueError("Annual jobs currently require the complete-array Parquet workflow.")
-    if list(cfg.RUN.MODELS.ENABLED) not in (["PCR"], ["PLS"], ["ENET_HUBER"], ["OLS3_HUBER"]):
-        raise ValueError("Select exactly one supported model: PCR, PLS, ENET_HUBER or OLS3_HUBER.")
+    if list(cfg.RUN.MODELS.ENABLED) not in (["PCR"], ["PLS"], ["ENET_HUBER"], ["OLS3_HUBER"], ["GLM_HUBER"]):
+        raise ValueError("Select exactly one supported model: PCR, PLS, ENET_HUBER, OLS3_HUBER or GLM_HUBER.")
     folder = Path(output).resolve()
     folder.mkdir(parents=True, exist_ok=False)
     cfg.RUN.SPLIT.FIRST_TEST_YEAR = first_year

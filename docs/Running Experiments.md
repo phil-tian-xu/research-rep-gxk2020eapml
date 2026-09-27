@@ -1,5 +1,15 @@
 # Running experiments
 
+GLM+H local pilot (approved settings and diagnostics in
+[GLM Huber Workflow](working_notes/GLM%20Huber%20Workflow.md)):
+
+```powershell
+python -B run_experiment.py glm --local --sample p05 --years 1987 --cpus 8
+```
+
+Test one year before extending the horizon. GLM uses the same list/resume/collect
+commands. Full-sample GLM memory and timing are not yet measured.
+
 ## Daily command reference: your PCR job 397900
 
 This section uses Phil's actual submission on 2026-09-26 (Hong Kong time).
