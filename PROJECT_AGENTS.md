@@ -64,6 +64,20 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+OLS-3 threshold sensitivity (2026-09-28): separate
+`python -B -m core.data_examine.ols3_thresholds --sample full --years 1987 1988 2011 2012`
+compares .999 quantiles of training absolute OLS-3 residuals, absolute returns,
+and absolute demeaned returns, plus ordinary OLS. Reuses unchanged loss/estimator
+with identical settings; no model selection or validation refit. Reads three
+features, saves annual fits and validation/test predictions, pooled All-stock
+Table 1 comparisons and diagnostic plots under
+`results/huber_threshold_sensitivity/<UTC timestamp>/`. Separate
+`run_ols3_thresholds_aihub.sh` requests 4 CPUs/8G/two hours; no remote submission.
+Three focused tests passed and real 1987 p05 check completed: baseline R2
+0.345153%, alternatives 0.345669%/0.345332%, OLS 0.331997%. No production fitting
+source/config or old results changed. No resume integration; full-data/AI Hub
+runs and Bash verification pending. See `docs/working_notes/OLS3 Threshold Sensitivity.md`.
+
 Experiment archival (2026-09-28): `run_experiment.py remove ID_OR_ABSOLUTE_PATH`
 moves one inactive experiment to the sibling `<results-root-name>_archive` folder,
 preserving its actual folder name and all saved records. Supports `--root` and

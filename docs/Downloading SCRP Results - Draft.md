@@ -1,4 +1,20 @@
-# Downloading completed SCRP results to your own PC
+Check Job Status:
+```bash
+squeue -u "$USER" -r
+```
+
+Check Experiment Status:
+```bash
+.venv/bin/python -B run_experiment.py list --refresh
+```
+
+Collect results:
+```bash
+.venv/bin/python -B run_experiment.py collect EXPERIMENT_ID
+```
+
+# Downloading completed SCRP results to 
+your own PC
 
 **Status: draft for Phil to review.**
 
