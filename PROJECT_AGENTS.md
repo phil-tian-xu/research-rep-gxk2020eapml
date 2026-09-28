@@ -64,6 +64,32 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+Figure 4 cluster launch scripts (2026-09-28): `run_figure4_scrp.sh` and
+`run_figure4_aihub.sh` pass report arguments to `core.figure4_report`, using one
+CPU-only Slurm job (initial 4 CPUs, 8G, four hours) for all selected years. SCRP
+uses the recorded pg/scrp/c32g4 settings; AI Hub uses site defaults unless sbatch
+options override them. Logs, environment and GNU time statistics go under
+`results/figure4_logs/`; report output remains timestamped with a figure4 folder.
+See `docs/working_notes/Figure 4 Workflow.md` for deployment and commands. No
+remote jobs submitted; Bash/Slurm runtime verification remains pending because
+Bash is unavailable locally. Existing fitting and annual launchers are unchanged.
+
+Saved-fit Figure 4 reporting (2026-09-28): `python -B -m core.figure4_report
+--experiment PATH [--years 1987]` reads annual imports and local Parquet data;
+never refits. Separate generic streaming zero-out evaluator supports nonlinear
+prediction callbacks and an exact linear shortcut. Current loader supports saved
+linear coefficients/intercept/features; existing ENet and OLS-3 have them, older
+PCR/PLS imports do not. Future nonlinear model loaders remain to be implemented.
+Grouping base characteristics with their macro interactions, and SIC dummies
+jointly, is explicitly author-code-unverified. Preserve negative scores; use raw
+plots if mean scores cannot be normalized without clipping. Timestamped outputs
+go under `results/replication_comparison/<timestamp>/figure4/`. Five new tests and
+13 existing evaluation tests passed. Real 1987 ENet check reproduced all 82,945
+test predictions within 2.09e-17; training importance covered 475,906 observations
+in 1957–1974, taking 54.2 seconds including prediction verification. Full 30-year
+importance remains unrun. See `docs/working_notes/Figure 4 Workflow.md`. New
+reporting modules are outside fit-resume source hashes; training code is unchanged.
+
 RF pilot (2026-09-28): `run_experiment.py rf --local --sample p05 --years 1987
 --cpus 8` uses `gkx_rf_v1`. Paper/appendix settings: 300 bootstrap trees, depth
 1–6, squared-error CART. Explicit pilot feature grid completes the appendix's
