@@ -456,6 +456,60 @@ metrics, selected components and Figure 3 plots under `annual/combined/`. It
 refuses incomplete or incompatible results. It does not average annual R2.
 For an existing complete report, the command prints its location without rewriting it.
 
+## Remove an experiment from the active list
+
+`remove` archives one explicitly selected experiment. It preserves all results,
+checkpoints, settings and logs, and does not cancel jobs or erase Slurm history.
+Run it on the cluster where the experiment was submitted:
+
+```bash
+cd ~/research-rep-gxk2020eapml
+.venv/bin/python -B run_experiment.py remove pls_full_1987-1988_20260928T125719130953Z
+.venv/bin/python -B run_experiment.py list --refresh
+```
+
+On SCRP this moves the selected folder from
+`/data/users/s1155269217/GKX2020/results/experiments/` to
+`/data/users/s1155269217/GKX2020/results/experiments_archive/`.
+The normal list no longer scans it. The command prints both paths.
+
+Use `--root PATH` for another results root, or `--aihub` for AI Hub. The archive
+is always a sibling directory named `<results-root-name>_archive`; for example,
+local `results/experiments` uses `results/experiments_archive`, and AI Hub uses
+`results/aihub_experiments_archive`.
+
+```bash
+.venv/bin/python -B run_experiment.py remove EXPERIMENT_ID --aihub
+.venv/bin/python -B run_experiment.py remove EXPERIMENT_ID --root /path/to/experiments
+```
+
+The argument is an exact folder name or absolute path directly under the selected
+results root. For a manually renamed copy, use its actual folder name/path, not
+the duplicate ID inside `launch.json`. Only that selected folder is moved.
+Symlink experiment folders and existing archive destinations are refused.
+
+The command checks the launcher record, existing execution/collection locks and,
+for submitted cluster runs, the live Slurm queue. Active jobs, uncertain submissions,
+or unavailable Slurm checks block archival. A completed run with saved results
+may be archived too; nothing is permanently deleted. Do not launch, resume or
+collect the same experiment concurrently with removal. On Windows, lock checks
+finish immediately before the move because open lock files prevent renaming.
+
+Archived records retain their original absolute paths. Before resuming or
+collecting, move the folder back to its exact original location, provided that
+location is unoccupied. Do not rewrite saved identities to relocate a run.
+For example, on SCRP:
+
+```bash
+mv -n -T \
+  /data/users/s1155269217/GKX2020/results/experiments_archive/EXPERIMENT_ID \
+  /data/users/s1155269217/GKX2020/results/experiments/EXPERIMENT_ID
+```
+
+`remove` is a launcher-only change. To deploy it while other jobs are running,
+transfer only the updated launcher and documentation; avoid a broad checkout
+update that also changes the fitting code used by those jobs.
+
 ## Where everything is saved
 
 Defaults:

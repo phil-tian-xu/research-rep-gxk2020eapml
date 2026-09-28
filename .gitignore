@@ -12,6 +12,10 @@
 slurm-*.out
 .ipynb_checkpoints/
 
+/docs/data-support-goyal-and-welch-2008.pdf
+/docs/main_paper.pdf
+/docs/online_appendix.pdf
+
 .obsidian/
 *.egg-info/
 

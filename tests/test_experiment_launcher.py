@@ -1,6 +1,7 @@
 from contextlib import redirect_stdout
 from io import StringIO
 import json
+import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import subprocess
@@ -9,7 +10,7 @@ from unittest.mock import patch
 
 import run_experiment as launcher
 from core.annual_jobs import load_plan
-from core.run_state import atomic_write
+from core.run_state import atomic_write, run_lock
 
 
 class ExperimentLauncherTests(unittest.TestCase):
@@ -218,6 +219,82 @@ class ExperimentLauncherTests(unittest.TestCase):
         scrp = self.prepare()
         with self.assertRaisesRegex(ValueError, "another backend"):
             launcher.main(["resume", str(scrp), "--aihub", "--dry-run"])
+
+    def test_remove_preserves_files_and_hides_only_selected_copy(self):
+        original = self.prepare(backend="--local", years="1987")
+        copy = original.with_name("friendly-copy")
+        shutil.copytree(original, copy)
+        (copy / "predictions.csv").write_text("observed,prediction\n1,2\n")
+        before = {str(p.relative_to(copy)): p.read_bytes() for p in copy.rglob("*") if p.is_file()}
+        destination = launcher.main(["remove", str(copy), "--root", str(original.parent)])
+        self.assertEqual(destination, (self.root / "results_archive" / "friendly-copy").resolve())
+        self.assertFalse(copy.exists())
+        self.assertTrue(original.exists())
+        for name, data in before.items():
+            self.assertEqual((destination / name).read_bytes(), data)
+        self.assertEqual(len(launcher.list_experiments(original.parent)), 1)
+        destination.rename(copy)  # Restoring the original path preserves the record.
+        self.assertEqual(len(launcher.list_experiments(original.parent)), 2)
+
+    def test_remove_checks_slurm_and_refuses_unavailable_or_active_queue(self):
+        folder = self.prepare(years="1987")
+        record = launcher.read_launch(folder)
+        record["submissions"].append({"state": "submitted", "job_id": "123"})
+        atomic_write(folder / "launch.json", json.dumps(record))
+        with patch("run_experiment.subprocess.run", side_effect=FileNotFoundError("squeue")):
+            with self.assertRaisesRegex(ValueError, "Cannot verify Slurm"):
+                launcher.main(["remove", folder.name, "--root", str(folder.parent)])
+        with patch("run_experiment.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "123\n", "")):
+            with self.assertRaisesRegex(ValueError, "queued/running"):
+                launcher.main(["remove", folder.name, "--root", str(folder.parent)])
+        self.assertTrue(folder.exists())
+        with patch("run_experiment.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")):
+            destination = launcher.main(["remove", folder.name, "--root", str(folder.parent)])
+        self.assertTrue(destination.is_dir())
+
+    def test_remove_refuses_collision_missing_and_outside_root(self):
+        folder = self.prepare(years="1987")
+        with self.assertRaisesRegex(ValueError, "not found"):
+            launcher.main(["remove", "missing", "--root", str(folder.parent)])
+        with self.assertRaisesRegex(ValueError, "direct experiment"):
+            launcher.main(["remove", str(folder), "--root", str(self.root / "elsewhere")])
+        destination = self.root / "results_archive" / folder.name
+        destination.mkdir(parents=True)
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            launcher.main(["remove", folder.name, "--root", str(folder.parent)])
+        self.assertTrue(folder.exists())
+
+    def test_remove_refuses_uncertain_submissions_and_invalid_records(self):
+        folder = self.prepare(years="1987")
+        record = launcher.read_launch(folder)
+        record["submissions"].append({"state": "unknown"})
+        atomic_write(folder / "launch.json", json.dumps(record))
+        with self.assertRaisesRegex(ValueError, "uncertain"):
+            launcher.main(["remove", folder.name, "--root", str(folder.parent)])
+        record["backend"] = "invalid"
+        atomic_write(folder / "launch.json", json.dumps(record))
+        with self.assertRaisesRegex(ValueError, "Invalid launcher"):
+            launcher.main(["remove", folder.name, "--root", str(folder.parent)])
+        self.assertTrue(folder.exists())
+
+    def test_remove_refuses_held_worker_lock(self):
+        folder = self.prepare(backend="--local", years="1987")
+        year = folder / "annual/years/1987"
+        year.mkdir(parents=True, exist_ok=True)
+        with run_lock(year):
+            with self.assertRaisesRegex(RuntimeError, "in use"):
+                launcher.main(["remove", folder.name, "--root", str(folder.parent)])
+        self.assertTrue(folder.exists())
+
+    def test_remove_aihub_uses_its_root_and_keeps_archive_separate(self):
+        folder = self.prepare(backend="--aihub", years="1987")
+        with patch.dict("os.environ", {}, clear=True), patch.object(launcher, "ROOT", self.root):
+            hub_root = self.root / "results/aihub_experiments"
+            hub_root.mkdir()
+            moved = folder.rename(hub_root / folder.name)
+            destination = launcher.main(["remove", moved.name, "--aihub"])
+        self.assertEqual(destination, (hub_root.with_name("aihub_experiments_archive") / folder.name).resolve())
+        self.assertTrue(destination.exists())
 
 
 if __name__ == "__main__":

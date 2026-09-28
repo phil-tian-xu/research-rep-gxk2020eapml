@@ -2,6 +2,7 @@
 
 import argparse
 from collections import Counter, defaultdict
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import hashlib
 import getpass
@@ -336,6 +337,66 @@ def list_experiments(root, refresh=False):
     return rows
 
 
+def remove_experiment(value, root=None, *, aihub=False):
+    """Archive one inactive experiment without changing its saved identities."""
+    root = results_root(root, aihub=aihub).resolve()
+    source = Path(value).expanduser()
+    if not source.is_absolute():
+        source = root / source
+    if source.is_symlink() or source.resolve().parent != root:
+        raise ValueError("Select a direct experiment folder under the results root; symlinks are not supported.")
+    folder = source.resolve()
+    if not folder.is_dir():
+        raise ValueError(f"Experiment not found: {value}. Use list or provide its full path.")
+    archive = root.with_name(root.name + "_archive")
+    if archive.is_symlink():
+        raise ValueError("The archive directory must not be a symlink.")
+    destination = archive / folder.name
+    if os.path.lexists(destination):
+        raise ValueError(f"Archive destination already exists: {destination}")
+
+    with ExitStack() as locks:
+        locks.enter_context(run_lock(folder))
+        try:
+            record = read_launch(folder)
+        except (KeyError, TypeError) as error:
+            raise ValueError("Invalid launcher record; cannot archive this directory.") from error
+        if (not isinstance(record.get("id"), str) or
+                record.get("backend") not in {"local", "scrp", "aihub"} or
+                not isinstance(record.get("submissions"), list) or
+                any(not isinstance(s, dict) or "state" not in s for s in record["submissions"])):
+            raise ValueError("Invalid launcher record; cannot archive this directory.")
+        if aihub and record["backend"] != "aihub":
+            raise ValueError("--aihub cannot remove an experiment from another backend.")
+        if record["backend"] == "local":
+            if any(s["state"] in {"running", "submitting", "unknown"} for s in record["submissions"]):
+                raise ValueError("Local execution is running or uncertain; reconcile its status before archiving.")
+        else:
+            if any(s["state"] == "submitted" and not s.get("job_id") for s in record["submissions"]):
+                raise ValueError("Submitted job ID is missing; reconcile its status before archiving.")
+            try:
+                ensure_inactive(record)
+            except (OSError, subprocess.SubprocessError) as error:
+                raise ValueError("Cannot verify Slurm inactivity; run remove on the original cluster when squeue is available.") from error
+        # Annual workers and collection use locks below the launcher directory.
+        for lock in sorted(folder.rglob(".run.lock")):
+            if lock.parent != folder:
+                locks.enter_context(run_lock(lock.parent))
+        archive.mkdir(exist_ok=True)
+        # Serialize archive operations so another remove cannot claim this name.
+        with run_lock(archive):
+            if os.path.lexists(destination):
+                raise ValueError(f"Archive destination already exists: {destination}")
+            if os.name == "nt":
+                # Windows cannot rename a directory containing our open lock files.
+                # Check them first, then close immediately before the rename.
+                locks.close()
+            folder.rename(destination)
+    print(f"Archived experiment (files preserved):\nFrom: {folder}\nTo:   {destination}")
+    print("Move it back to the original path before resuming or collecting.")
+    return destination
+
+
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
@@ -371,6 +432,10 @@ def parser():
     report.add_argument("experiment")
     report.add_argument("--root")
     report.add_argument("--aihub", action="store_true")
+    removal = commands.add_parser("remove", help="Move one inactive experiment to the sibling archive directory.")
+    removal.add_argument("experiment", help="Exact folder name or absolute path under the results root.")
+    removal.add_argument("--root")
+    removal.add_argument("--aihub", action="store_true")
     return result
 
 
@@ -383,6 +448,8 @@ def main(argv=None):
         raise ValueError("--after applies only to Slurm submissions.")
     if args.command == "list":
         return list_experiments(results_root(args.root, aihub=args.aihub), args.refresh)
+    if args.command == "remove":
+        return remove_experiment(args.experiment, args.root, aihub=args.aihub)
     if args.command == "collect":
         folder = resolve_experiment(args.experiment, args.root, aihub=args.aihub)
         if (folder / "annual/combined/source_identity.json").is_file():

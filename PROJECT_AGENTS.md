@@ -64,6 +64,14 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+Experiment archival (2026-09-28): `run_experiment.py remove ID_OR_ABSOLUTE_PATH`
+moves one inactive experiment to the sibling `<results-root-name>_archive` folder,
+preserving its actual folder name and all saved records. Supports `--root` and
+`--aihub`; archived folders disappear from normal listing. Checks launcher records,
+Slurm inactivity and execution/collection locks; refuses symlinks and destination
+collisions. Restore the exact original path before resume/collect. No fitting
+code or remote experiments changed. See `docs/Running Experiments.md` for usage.
+
 Figures 4/5 saved-state update (2026-09-28): current dense PCR/PLS checkpoints
 now save original-panel slopes/intercept, feature order and selected transforms/
 directions; RF saves portable numeric tree arrays. ENet/OLS-3 and GLM already
