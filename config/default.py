@@ -94,6 +94,7 @@ _C.RUN = CfgNode({
                       "DUMMY_PREFIX": "sic2_", "INTERCEPT": "training_mean",
                       "TUNING": "squared_then_huber", "OBJECTIVE": "mean_half_loss"},
         "PCR": {"COMPONENT_GRID": []},
+        "RF": {"N_TREES": 300, "DEPTH_GRID": [], "MAX_FEATURES_GRID": [], "SEED": 2020},
         "PLS": {"COMPONENT_GRID": [], "TOL": 1e-12},
     },
     "EVALUATION": {

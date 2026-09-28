@@ -16,7 +16,7 @@ from core.run_state import atomic_write, load_run_config, read_checkpoints, reso
 
 # GKX (2020), Table 1, printed p. 2250: percentage R2, 1987-2016, full universe.
 PAPER_ALL_R2_PERCENT = {"OLS_HUBER": -3.46, "PLS": .27, "PCR": .26,
-                        "ENET_HUBER": .11, "OLS3_HUBER": .16, "GLM_HUBER": .19}
+                        "ENET_HUBER": .11, "OLS3_HUBER": .16, "GLM_HUBER": .19, "RF": .33}
 
 
 def report_tables(records, cfg):
@@ -143,10 +143,42 @@ def report_tables(records, cfg):
                                    "loss_above_best": candidate["validation_loss"] - scores[selected],
                                    "selected": index == selected})
             complexity.append(row)
+    if "RF" in models:
+        for year in years:
+            row = dict(model="RF", test_year=year, status="pending", average_tree_depth=np.nan,
+                       max_depth=np.nan, max_features=np.nan, validation_loss=np.nan,
+                       at_grid_min=False, at_grid_max=False)
+            if (year, "RF") in records:
+                tuning = records[year, "RF"]["tuning"]
+                candidates = tuning["validation_results"]
+                scores = np.asarray([c["validation_loss"] for c in candidates])
+                if not len(scores) or not np.isfinite(scores).all():
+                    raise ValueError(f"Invalid RF tuning scores: {year}.")
+                selected = int(np.argmin(scores))
+                params = candidates[selected]["params"]
+                depths = np.asarray(tuning["tree_depths"])
+                if (params != tuning["best_params"] or len(depths) != params["n_estimators"] or
+                        not np.isfinite(depths).all() or (depths < 0).any() or
+                        (depths > params["max_depth"]).any() or
+                        not np.isclose(depths.mean(), tuning["average_tree_depth"])):
+                    raise ValueError(f"Invalid RF selection/depth diagnostics: {year}.")
+                row.update(status="complete", average_tree_depth=float(depths.mean()),
+                           max_depth=params["max_depth"], max_features=params["max_features"],
+                           validation_loss=float(scores[selected]),
+                           at_grid_min=params["max_depth"] == min(cfg.RUN.MODELS.RF.DEPTH_GRID),
+                           at_grid_max=params["max_depth"] == max(cfg.RUN.MODELS.RF.DEPTH_GRID))
+                for index, candidate in enumerate(candidates):
+                    curves.append(dict(model="RF", test_year=year,
+                        max_depth=candidate["params"]["max_depth"], max_features=candidate["params"]["max_features"],
+                        average_tree_depth=candidate["average_tree_depth"],
+                        validation_loss=candidate["validation_loss"],
+                        loss_above_best=candidate["validation_loss"] - scores[selected], selected=index == selected))
+            complexity.append(row)
     return (pd.DataFrame(table), pd.DataFrame(complexity),
             pd.DataFrame(curves, columns=["model", "test_year", "requested_components", "fitted_components",
                                          "validation_loss", "loss_above_best", "selected", "penalty_strength",
-                                         "nonzero_slopes", "active_groups", "huber_delta", "iterations", "stationarity"]))
+                                         "nonzero_slopes", "active_groups", "huber_delta", "iterations", "stationarity",
+                                         "max_depth", "max_features", "average_tree_depth"]))
 
 
 def plot_complexity(complexity, cfg, output):
@@ -155,7 +187,7 @@ def plot_complexity(complexity, cfg, output):
     import matplotlib.pyplot as plt
     from matplotlib.ticker import MaxNLocator
 
-    models = [name for name in ("PCR", "PLS", "ENET_HUBER", "GLM_HUBER") if name in cfg.RUN.MODELS.ENABLED]
+    models = [name for name in ("PCR", "PLS", "ENET_HUBER", "GLM_HUBER", "RF") if name in cfg.RUN.MODELS.ENABLED]
     if not models:
         return
     fig, axes = plt.subplots(len(models), 1, figsize=(10, 3.5 * len(models)),
@@ -163,6 +195,12 @@ def plot_complexity(complexity, cfg, output):
     axes = axes[:, 0]
     for ax, model in zip(axes, models):
         group = complexity[complexity.model == model] if not complexity.empty else pd.DataFrame()
+        if model == "RF":
+            if not group.empty:
+                ax.plot(group.test_year, group.average_tree_depth, "o-", color="#246B8E", markersize=3)
+            ax.set(title="RF", ylabel="Average realized tree depth")
+            ax.grid(alpha=.2)
+            continue
         if model in {"ENET_HUBER", "GLM_HUBER"}:
             if not group.empty:
                 values = group.active_groups if model == "GLM_HUBER" else group.nonzero_slopes
@@ -200,12 +238,22 @@ def plot_validation_curves(curves, output):
     import matplotlib.pyplot as plt
 
     for year, group in curves.groupby("test_year", sort=True):
-        models = [name for name in ("PCR", "PLS", "ENET_HUBER", "GLM_HUBER") if name in set(group.model)]
+        models = [name for name in ("PCR", "PLS", "ENET_HUBER", "GLM_HUBER", "RF") if name in set(group.model)]
         if not models:
             continue  # OLS-3+H has no penalty tuning.
         fig, axes = plt.subplots(1, len(models), figsize=(5 * len(models), 3.7),
                                  layout="constrained", squeeze=False)
         for ax, model in zip(axes[0], models):
+            if model == "RF":
+                for count, points in group[group.model == model].groupby("max_features"):
+                    points = points.sort_values("max_depth")
+                    ax.plot(points.max_depth, points.loss_above_best, "o-", markersize=2, label=f"{int(count)} features")
+                best = group[(group.model == model) & group.selected]
+                ax.scatter(best.max_depth, best.loss_above_best, color="#BE5932", zorder=3)
+                ax.set(title="RF", xlabel="Maximum depth", ylabel="Validation loss above best")
+                ax.legend(fontsize=6)
+                ax.grid(alpha=.2)
+                continue
             if model in {"ENET_HUBER", "GLM_HUBER"}:
                 points = group[group.model == model].sort_values("penalty_strength")
                 ax.semilogx(points.penalty_strength, points.loss_above_best, "o-")
@@ -244,6 +292,7 @@ def make_report(run_dir):
                      "Reference values are from GKX Table 1, All row, full universe, 1987-2016.\n"
                      "Development subsamples, partial periods, and unverified settings are not exact replications.\n"
                      "Figure 3 displays PCR/PLS components or ENet nonzero slopes (intercept excluded).\n"
+                     "GLM uses active input groups; RF uses average realized tree depth, not its configured cap.\n"
                      "Missing years are gaps, not zeros. OLS-3 has no tuned complexity plot.\n"
                      "Selected counts can change sharply when validation losses are nearly tied; inspect tuning curves.\n")
         manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))

@@ -64,6 +64,20 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+RF pilot (2026-09-28): `run_experiment.py rf --local --sample p05 --years 1987
+--cpus 8` uses `gkx_rf_v1`. Paper/appendix settings: 300 bootstrap trees, depth
+1–6, squared-error CART. Explicit pilot feature grid completes the appendix's
+ellipsis with [3,5,10,20,30,50,100,200,400,920]. Standard scikit-learn stopping,
+float32 predictors, float64 targets, seed 2020+year; validation MSE selects one
+training-only forest without refit. Figure 3 records average realized tree depth.
+Annual checkpoints, reports, launcher and collection support RF. CPU-capped tree
+fitting is parallel; candidates and prediction accumulation are serial. See
+`docs/working_notes/Random Forest Workflow.md`. No server jobs submitted.
+Verification: 192 tests passed, including bootstrap leaf means, tree averaging,
+thread-count reproducibility, independent validation-score checks, annual resume,
+launcher integration and replication plots. Scikit-learn 1.9.1 installed/tested;
+dependency and uv lock updated. The real 5% annual RF run is left to Phil.
+
 GLM+H empirical pilot (2026-09-27): `run_experiment.py glm --local --sample p05
 --years 1987 --cpus 8` uses `gkx_glm_huber_v1`. Phil approved training-only spline
 centering/scaling, singleton SIC groups, fixed training-mean intercept and squared

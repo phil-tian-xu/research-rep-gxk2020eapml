@@ -1,0 +1,20 @@
+# GKX RF pilot; see docs/working_notes/Random Forest Workflow.md.
+GENERAL:
+  NAME: "gkx_rf_v1"
+  TASK_TYPE: "run"
+DATA:
+  DATASET: "gkx_dev_p05_seed2020_parquet"
+  FORMAT: "parquet"
+  BATCH_SIZE: 10000
+RUN:
+  FITTING: "dense"
+  MODELS:
+    ENABLED: ["RF"]
+    RF:
+      N_TREES: 300
+      DEPTH_GRID: [1, 2, 3, 4, 5, 6]
+      # Values after 50 explicitly complete the appendix's unspecified ellipsis.
+      MAX_FEATURES_GRID: [3, 5, 10, 20, 30, 50, 100, 200, 400, 920]
+      SEED: 2020
+  REPORT_TABLE1_FIGURE3: true
+  OUTPUT_DIR: "results/gkx_rf_v1"

@@ -3,6 +3,7 @@ name = "research-rep-gxk2020eapml"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "scikit-learn>=1.7,<2",
     "matplotlib>=3.9,<4",
     "PyYAML>=6,<7",
     "iopath>=0.1.10,<0.2",

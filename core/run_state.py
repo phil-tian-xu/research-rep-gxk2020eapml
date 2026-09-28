@@ -40,13 +40,13 @@ def runtime_identity():
         "core/model_selection.py", "core/model_inputs.py", "core/losses.py",
         "core/optimizers.py", "core/data_query/datasets.py", "utils/general_utils.py",
         "core/batch_run.py", "core/data_query/parquet_dataset.py",
-        "core/dense_parquet_run.py", "core/dense_linear_run.py", "core/dense_glm_run.py", "core/data_examine/pcr_memory.py",
+        "core/dense_parquet_run.py", "core/dense_linear_run.py", "core/dense_glm_run.py", "core/dense_rf_run.py", "core/data_examine/pcr_memory.py",
     )]
     for directory in ("core/models", "core/evaluation", "utils/config_utils"):
         paths.extend((root / directory).glob("*.py"))
     return {
         "python": platform.python_version(),
-        "packages": {name: version(name) for name in ("numpy", "pandas", "scipy", "PyYAML", "iopath", "pyarrow")},
+        "packages": {name: version(name) for name in ("numpy", "pandas", "scipy", "PyYAML", "iopath", "pyarrow", "scikit-learn")},
         "source_sha256": {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                           for path in sorted(paths)},
     }

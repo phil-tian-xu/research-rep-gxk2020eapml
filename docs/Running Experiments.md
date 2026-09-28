@@ -1,5 +1,14 @@
 # Running experiments
 
+RF local pilot ([settings and outputs](working_notes/Random%20Forest%20Workflow.md)):
+
+```powershell
+python -B run_experiment.py rf --local --sample p05 --years 1987 --cpus 8
+```
+
+Uses `gkx_rf_v1`: 300 trees and 60 depth/feature-count candidates; saves annual
+R2 and actual average tree depth. This is a one-year check with the full pilot grid.
+
 GLM+H local pilot (approved settings and diagnostics in
 [GLM Huber Workflow](working_notes/GLM%20Huber%20Workflow.md)):
 

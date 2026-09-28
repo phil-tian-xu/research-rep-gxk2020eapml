@@ -46,7 +46,7 @@ class ExperimentLauncherTests(unittest.TestCase):
         self.assertEqual(len(list((folder / "annual/configs").glob("*.yaml"))), 1)
 
     def test_huber_commands_select_correct_model_and_full_sample(self):
-        for command, model in (("enet", "ENET_HUBER"), ("ols3", "OLS3_HUBER"), ("glm", "GLM_HUBER")):
+        for command, model in (("enet", "ENET_HUBER"), ("ols3", "OLS3_HUBER"), ("glm", "GLM_HUBER"), ("rf", "RF")):
             folder = self.prepare(command, "--scrp", "2016", "full")
             _, plan = load_plan(folder / "annual")
             self.assertEqual(plan["config"]["RUN"]["MODELS"]["ENABLED"], [model])
