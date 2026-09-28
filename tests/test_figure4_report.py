@@ -59,7 +59,7 @@ class StreamingImportanceTests(unittest.TestCase):
                                n_features=1, groups={"a": [0]})
         with self.assertRaises(ValueError):
             restore_predictor({"specification": "PCR", "best_params": {"n_components": 5}})
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaises(ValueError):
             restore_predictor({"specification": "RF"})
 
     def test_negative_scores_preserved_and_annual_means_precede_normalization(self):

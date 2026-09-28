@@ -230,6 +230,12 @@ class BatchWorkflowTests(unittest.TestCase):
         saved = read_checkpoints(full, self.cfg)
         for tuning in reference.tuning_history:
             actual = saved[tuning["test_year"], "PLS"]["tuning"]
+            from core.figure4_report import restore_predictor
+            predict, names, _ = restore_predictor(actual)
+            record = saved[tuning["test_year"], "PLS"]
+            positions = np.asarray(record["predictions"]["row_position"])
+            assert_allclose(predict(self.X[positions]), record["predictions"]["prediction"], atol=1e-14)
+            self.assertEqual(names, list(self.panel.features))
             self.assertEqual(actual["best_params"], tuning["best_params"])
             for a, b in zip(actual["validation_results"], tuning["validation_results"]):
                 self.assertAlmostEqual(a["validation_loss"], b["validation_loss"], places=14)
@@ -296,6 +302,11 @@ class BatchWorkflowTests(unittest.TestCase):
         for tuning in reference.tuning_history:
             saved = read_checkpoints(folder, self.cfg)[tuning["test_year"], "PCR"]["tuning"]
             self.assertEqual(saved["best_params"], tuning["best_params"])
+            from core.figure4_report import restore_predictor
+            predict, names, _ = restore_predictor(saved)
+            rows = actual.loc[actual.test_year.eq(tuning["test_year"])]
+            assert_allclose(predict(self.X[rows.row_position.to_numpy()]), rows.prediction, atol=1e-14)
+            self.assertEqual(names, list(self.panel.features))
         output = folder / "table1_figure3"
         self.assertTrue((output / "figure3_complexity.png").is_file())
         self.assertTrue(pd.read_csv(output / "table1_all.csv").complete_horizon.all())

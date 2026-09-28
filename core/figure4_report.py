@@ -12,6 +12,7 @@ import pandas as pd
 
 from core.data_query.parquet_dataset import ParquetPanel
 from core.figure4_importance import characteristic_groups, streaming_zero_out
+from core.models.saved_fit import restore_forest, restore_spline
 from core.run_state import dataset_identity, load_run_config, read_checkpoints
 
 
@@ -23,19 +24,30 @@ def restore_predictor(tuning):
     Only explicitly recognized linear models may use the coefficient shortcut.
     """
     model = tuning["specification"]
-    if model not in {"OLS", "OLS_HUBER", "OLS3_HUBER", "ENET_HUBER", "PCR", "PLS"}:
+    if model not in {"OLS", "OLS_HUBER", "OLS3_HUBER", "ENET_HUBER", "PCR", "PLS", "GLM_HUBER", "RF"}:
         raise NotImplementedError(f"No saved-predictor loader for {model}; no refit will be attempted.")
+    if model == "RF":
+        if not {"forest_state", "feature_names"} <= tuning.keys():
+            raise ValueError("RF lacks saved fitted trees; no refit attempted.")
+        names = list(tuning["feature_names"])
+        if not names or len(set(names)) != len(names) or len(names) != tuning["forest_state"]["n_features"]:
+            raise ValueError("Invalid saved forest features.")
+        return restore_forest(tuning["forest_state"]), names, None
     if not {"coefficients", "intercept", "feature_names"} <= tuning.keys():
         raise ValueError(f"{model} lacks saved coefficients/intercept/feature names. "
-                         "Existing PCR/PLS imports cannot support Figure 4; no refit attempted.")
+                         "This checkpoint cannot support Figures 4/5; no refit attempted.")
     names = list(tuning["feature_names"])
     beta = np.asarray(tuning["coefficients"], dtype=float)
     intercept = float(tuning["intercept"])
-    if (not names or len(set(names)) != len(names) or beta.shape != (len(names),)
+    basis = restore_spline(tuning["spline_state"], len(names)) if model == "GLM_HUBER" else None
+    width = sum(basis.group_sizes_) if basis is not None else len(names)
+    if (not names or len(set(names)) != len(names) or beta.shape != (width,)
             or not np.isfinite(beta).all() or not np.isfinite(intercept)):
         raise ValueError("Invalid saved linear parameters.")
     if tuning.get("converged") is False:
         raise ValueError("Saved model did not converge.")
+    if basis is not None:
+        return lambda X: basis.transform(X) @ beta + intercept, names, None
     return lambda X: X @ beta + intercept, names, beta
 
 

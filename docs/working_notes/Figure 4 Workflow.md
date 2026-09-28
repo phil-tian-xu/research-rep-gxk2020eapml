@@ -1,8 +1,9 @@
-# Figure 4 from saved fits
+# Figures 4 and 5 from saved fits
 
 This is a separate reporting workflow. It never trains models or repeats tuning.
 The current ENet imports contain the required state for all 30 years. Existing
-PCR/PLS imports lack coefficients and must be skipped. OLS-3 can be reported as a
+PCR/PLS imports lack coefficients and must be skipped. New dense PCR/PLS runs
+save their selected fitted state (see below). OLS-3 can be reported as a
 supplementary three-characteristic diagnostic, not an original Figure 4 panel.
 
 From the repository root, start with one test year:
@@ -45,8 +46,9 @@ confirmed site options to `sbatch` if required. Current account eligibility and
 availability have not been queried. On SCRP, inspect `qos` and `scrp-info`; on
 AI Hub, inspect `sinfo` and your account association as described in the AI Hub run guide.
 
-Deploy the two new Python modules (`core/figure4_report.py` and
-`core/figure4_importance.py`) and the appropriate shell script. Do not overwrite
+Deploy the reporting modules (`core/figure4_report.py`, `core/figure4_importance.py`,
+`core/figure5_report.py`) and their `core/models/saved_fit.py` and
+`core/models/glm.py` dependencies with the appropriate shell script. Do not overwrite
 training sources or environments needed by active model jobs. Preserve LF line
 endings for the shell scripts (`.gitattributes` already specifies this).
 The cluster environment needs the existing project dependencies and GNU
@@ -162,6 +164,69 @@ Runtime includes reading and hashing data. Thirty overlapping training windows
 still require substantial I/O; a one-year elapsed time is not a guaranteed full-run
 estimate. Plotting itself is inexpensive.
 
+## Selected annual state saved by current dense runners (2026-09-28)
+
+Figures 4 and 5 require predictions from the selected annual fit on its original
+training sample, including counterfactual predictions after setting a characteristic
+to zero. Test predictions, the selected hyperparameter and coefficient magnitudes
+alone are insufficient. We preserve the fixed model, exact feature order and
+training data identity, and calculate importance later without refitting. There
+is no need to duplicate the large training panel or save every candidate model.
+
+| Model | State retained in the atomic model-year checkpoint |
+| --- | --- |
+| PCR/PLS | Original-panel coefficients and intercept, feature order; training means/scales, target mean, selected component directions and component coefficients; actual component count and PLS stopping reason |
+| ENet/OLS-3 | Existing original-panel coefficients, intercept and feature order |
+| GLM | Existing spline knots, raw scales, expanded-basis means/scales, group structure, coefficients and intercept; reporter now restores these |
+| RF | Selected forest's numeric child indices, splitting features/thresholds and node predictions, tree order and float32 input convention; reporter now restores these |
+
+The checkpoint's existing validation results, resolved config, sample counts,
+test row positions/predictions, and hashed dataset manifest complete the record.
+Keep `annual/years/` including manifests/configs/checkpoint JSON, and the matching
+unchanged Parquet panel. Combined plots alone are insufficient. RF impurity
+importance is retained but is not substituted for zero-out R2 importance.
+State uses JSON numbers/lists, not executable pickle. These changes affect fit
+source hashes: start fresh runs. Old checkpoints are never retroactively upgraded.
+This update covers the current dense launcher baselines; legacy CSV/batch runners
+are not upgraded. Models not yet implemented (GBRT/neural networks) remain outside
+the supported report loaders.
+
+Zeroing is in original panel coordinates, before fixed fitted scaling or spline
+expansion. For PLS, slopes already undo training standardization, so the report
+must not standardize again. For GLM, zero inputs pass through the saved spline
+transform. No means, scales, knots or tree splits are re-estimated.
+
+## Figure 5: annual ranks, then averages
+
+The paper's Section 2.3 and footnote 36 (printed page 2254), and Figure 5
+(page 2256), require annual ranks averaged over the thirty training samples.
+This is different from ranking the mean importance used in Figure 4.
+The heatmap includes all 94 characteristics plus the joint SIC group (95 rows),
+with model columns and row ordering based on the sum of model-specific average
+ranks. We use rank 1 for best, average ranks for exact ties, and alphabetical
+row order for tied rank sums. The tie convention is our explicit choice.
+
+After the existing Figure 4 command completes, use its printed output directory:
+
+```powershell
+python -B -m core.figure5_report --figure4 results/replication_comparison/TIMESTAMP/figure4
+```
+
+Supply multiple completed Figure 4 directories after `--figure4` to combine
+models or disjoint years. Data identities and grouping conventions must agree;
+every model must have the same years and predictor groups. Overlapping records
+are rejected. Do not mix a three-predictor OLS-3 report into a 95-group heatmap.
+Partial periods/model sets remain explicitly labeled diagnostics, not the full
+paper reproduction. Negative scores and zero-importance years remain in ranks.
+An intercept-only PLS fit gives all 95 groups the same annual rank (48).
+
+Outputs under `results/replication_comparison/<timestamp>/figure5/` include
+`annual_ranks.csv`, `mean_ranks.csv`, `rank_matrix.csv`, `characteristic_ranks.png`
+and `.svg`, plus `methodology.json` recording source file hashes and conventions.
+It reads only the annual importance CSVs and metadata; no panel or model fitting
+is needed. Figure 4's annual CSV, verification SSE totals and group mapping must
+be kept, not just its top-20 chart or mean scores.
+
 ## Adding models later
 
 `core/figure4_importance.py` accepts any row-independent `predict(X)`
@@ -173,11 +238,10 @@ code are required by the evaluator.
 point. Add a loader for an actual saved nonlinear representation when it exists,
 returning `(predict, feature_names, None)`. The callback must apply the original
 saved preprocessing. Never treat GLM spline coefficients as raw-feature slopes.
-Future PCR/PLS coefficients must be in original input coordinates with an intercept
-and exact feature order; existing model classes provide these, but older runs did
-not save them. Current recognized linear loaders reject missing fitted state.
-No training or checkpoint writer was changed by this reporting addition. The new
-modules sit outside the directories automatically included in fit-resume hashes.
+PCR/PLS coefficients are in original input coordinates with an intercept and
+exact feature order. Current recognized loaders reject missing fitted state.
+The 2026-09-28 saved-state update changes training/checkpoint writer hashes;
+the original reporting-only implementation did not.
 
 Focused checks:
 
@@ -196,3 +260,21 @@ predictions within 2.09e-17 maximum absolute error. Its training importance used
 54.2 seconds. Outputs are under
 `results/replication_comparison/20260928T171334534660+0800/figure4/`.
 This is a one-year diagnostic; the full 30-year importance calculation has not run.
+
+Saved-state verification (2026-09-28): all 203 tests passed, including scaled
+PCR/PLS zero/nonzero-component restoration, unseen and zeroed inputs, GLM spline
+restoration, exact RF/sklearn predictions, annual-rank-before-average behavior,
+ties/negative scores and coverage rejection. Additional annual-run assertions
+verify that actual PCR/PLS/RF checkpoint parameters reproduce their saved test
+predictions after serialization.
+
+A fresh real fixed-5% PLS run for 1987-1988 completed at
+`results/experiments/pls_p05_1987-1988_20260928T120917066756Z`.
+The report restored all 7,772 test predictions with zero discrepancy, and read
+22,395/25,379 training observations respectively. Both selected K=0, so all
+95 groups have zero importance and tied mean rank 48. This is expected; these
+two years do not establish full-sample replication or a nontrivial ranking.
+No fitting was performed by either reporting command. Outputs:
+
+- `results/replication_comparison/20260928T201127098978+0800/figure4/`
+- `results/replication_comparison/20260928T201213934701+0800/figure5/`

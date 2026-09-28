@@ -6,6 +6,7 @@ import pandas as pd
 from core.batch_run import _check_saved, rebuild_batch_reports
 from core.data_query.parquet_dataset import load_window
 from core.evaluation.prediction_metrics import zero_benchmark_r2
+from core.models.saved_fit import linear_state
 from core.run import configured_loss, configured_specifications
 from core.run_state import read_checkpoints, resolve_run_dir, run_lock, save_checkpoint, validate_run
 
@@ -107,7 +108,8 @@ def run_parquet(panel, cfg, *, checkpoint_dir, stop_after_year=None, memory_snap
                 predictions = pd.DataFrame({"specification": name, "test_year": year,
                     "row_position": positions, "return_month": months, "observed": y, "prediction": prediction})
                 tuning = {"specification": name, "test_year": year,
-                          "best_params": best_params, "validation_results": records}
+                          "best_params": best_params, "validation_results": records,
+                          **linear_state(best, panel.features)}
                 save_checkpoint(folder, metrics, predictions, tuning)
                 print(f"[{name} {year}] Saved; selected K={best_params['n_components']}; "
                       f"test R2={100 * metrics['r2_zero']:.6f}%", flush=True)

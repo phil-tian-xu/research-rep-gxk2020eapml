@@ -8,6 +8,7 @@ from core.batch_run import _check_saved, rebuild_batch_reports
 from core.data_query.parquet_dataset import load_window
 from core.evaluation.prediction_metrics import zero_benchmark_r2
 from core.models.random_forest import cpu_budget, diagnostics, make_forest
+from core.models.saved_fit import forest_state
 from core.run import configured_loss
 from core.run_state import read_checkpoints, resolve_run_dir, run_lock, save_checkpoint, validate_run
 
@@ -110,7 +111,8 @@ def run_parquet(panel, cfg, *, checkpoint_dir, stop_after_year=None, memory_snap
                     validation_results=candidates, feature_names=list(panel.features),
                     sklearn_version=sklearn.__version__, fit_n_jobs=workers, prediction_n_jobs=1,
                     estimator_params=best.get_params(), predictor_dtype="float32", target_dtype="float64",
-                    bootstrap_rows=n_train, feature_importances=best.feature_importances_.tolist(), **info)
+                    bootstrap_rows=n_train, feature_importances=best.feature_importances_.tolist(),
+                    forest_state=forest_state(best), **info)
                 save_checkpoint(folder, metrics, predictions, tuning)
                 print(f"{label} Saved; average depth={info['average_tree_depth']:.4f}; test R2={100 * metrics['r2_zero']:.6f}%", flush=True)
                 del best, X, y, positions, months, prediction, predictions

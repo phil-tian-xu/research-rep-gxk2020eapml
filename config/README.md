@@ -6,7 +6,7 @@ For new experiments use `run_experiment.py` and the single
 | CLI model | Current baseline config | Research settings |
 | --- | --- | --- |
 | `pcr` | `gkx_pcr_full_v5.yaml` | Original complete-array PCR, K=0–100 |
-| `pls` | `gkx_pls_p05_v1.yaml` | Original complete-array PLS, K=0–10 |
+| `pls` | `gkx_pls_v2.yaml` | Complete-array PLS, training-only standardization, K=0–29 |
 | `enet` | `gkx_enet_huber_v1.yaml` | Huber + elastic net, rho=0.5, ten penalties from 1e-4 to 1e-1 |
 | `ols3` | `gkx_ols3_huber_v1.yaml` | Huber regression on mvel1, bm, mom12m |
 

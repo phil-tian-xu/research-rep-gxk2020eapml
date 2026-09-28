@@ -64,6 +64,36 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+Figures 4/5 saved-state update (2026-09-28): current dense PCR/PLS checkpoints
+now save original-panel slopes/intercept, feature order and selected transforms/
+directions; RF saves portable numeric tree arrays. ENet/OLS-3 and GLM already
+save sufficient state. Figure 4 now restores GLM splines and RF trees as well
+as linear models, verifying saved test predictions before training zero-out
+importance. New `core.figure5_report --figure4 PATH [PATH ...]` consumes complete
+annual importance reports: rank within year, average ranks over years, sum
+across models. Requires matching years/predictor groups/data identities; preserves
+signed scores and ties. This completes the previously deferred saving work for
+current dense launcher models. Old PCR/PLS/RF checkpoints cannot be upgraded
+without refitting; legacy CSV/batch writers are unchanged. New source hashes
+require fresh fitting runs. All 203 tests passed. Fresh 1987-1988 fixed-5% PLS
+run `pls_p05_1987-1988_20260928T120917066756Z` completed; restored all 7,772 test
+predictions exactly and generated both reports without refitting. Both K=0 fits
+give zero importance and tied mean rank 48 for all 95 groups, as expected.
+No server jobs submitted. See `docs/working_notes/Figure 4 Workflow.md`.
+
+PLS specification revision (2026-09-28): new `run_experiment.py pls` runs use
+`gkx_pls_v2`: training-only predictor standardization and K=0..29. This supersedes
+the launcher default noted in older entries below; `gkx_pls_p05_v1` stays intact
+for historical reproduction. Existing SIMPLS, fitted intercept, annual splits,
+MSE selection, and no-refit behavior are unchanged. Scaling and grid are motivated
+by public author simulation code, not recovered empirical settings. All 197 tests
+passed. A local 1987-1988 fixed-5% end-to-end check completed: selected K=0 in
+both years, pooled test R2=0.130248%. No server jobs were submitted. These small
+sample results do not establish improved full-sample replication.
+PLS parameter saving for Figures 4/5 was deferred at that stage and has now
+been implemented in the saved-state update above. See
+`docs/working_notes/PLS Small Sample Workflow.md` for commands and evidence.
+
 Figure 4 cluster launch scripts (2026-09-28): `run_figure4_scrp.sh` and
 `run_figure4_aihub.sh` pass report arguments to `core.figure4_report`, using one
 CPU-only Slurm job (initial 4 CPUs, 8G, four hours) for all selected years. SCRP

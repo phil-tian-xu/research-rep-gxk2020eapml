@@ -1,5 +1,13 @@
 # Running experiments
 
+New dense runs save the selected fitted model for post-run Figures 4 and 5.
+PCR/PLS now save coefficients, intercept, feature order and fitted transforms;
+RF saves its selected trees. ENet/OLS-3 and GLM already retain their fitted state.
+Keep the complete annual checkpoints and matching prepared data. Generate
+Figure 4 from saved fits, then Figure 5 from its annual scores using the
+[Figures 4/5 workflow](working_notes/Figure%204%20Workflow.md).
+Older PCR/PLS/RF checkpoints lack this state; use fresh runs after this update.
+
 RF local pilot ([settings and outputs](working_notes/Random%20Forest%20Workflow.md)):
 
 ```powershell
@@ -375,12 +383,19 @@ annual tasks at four; it does not guarantee four allocations. Defaults:
 
 | Setting | PCR | PLS |
 | --- | --- | --- |
-| Research config | `gkx_pcr_full_v5` | `gkx_pls_p05_v1` |
-| Tuning grid | K=0–100 | K=0–10 |
+| Research config | `gkx_pcr_full_v5` | `gkx_pls_v2` |
+| Tuning grid | K=0–100 | K=0–29 |
+| Additional predictor standardization | Off | Training-only standard deviation |
 | SCRP concurrency | 4 | 4 |
 | CPUs/task | 8 | 8 |
 | RAM/task | 128G | 192G |
 | Time/task | 02:00:00 | 12:00:00 |
+
+PLS v2 enables training-only standardization and expands the grid; see
+[PLS workflow](working_notes/PLS%20Small%20Sample%20Workflow.md) for evidence,
+limitations and the two-year check. Start a new experiment to use v2: resuming
+an existing experiment retains its saved specification. To reproduce the old
+baseline, supply `--config gkx_pls_p05_v1` explicitly.
 
 The PLS RAM/time defaults are initial test allocations, not measured requirements.
 For its first full-universe run explicitly select one year and `--parallel 1`.

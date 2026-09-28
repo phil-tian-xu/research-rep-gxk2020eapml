@@ -87,6 +87,11 @@ class RFWorkflowTests(unittest.TestCase):
             best = make_forest(**tuning['best_params'], n_jobs=1).fit(X.astype('float32'), y)
             T, _, _, _ = load_window(self.panel, year, year)
             assert_allclose(best.predict(T.astype('float32')), record['predictions']['prediction'], atol=1e-15)
+            from core.figure4_report import restore_predictor
+            predict, names, shortcut = restore_predictor(tuning)
+            self.assertEqual(names, list(self.panel.features))
+            self.assertIsNone(shortcut)
+            assert_allclose(predict(T), record['predictions']['prediction'], atol=0, rtol=0)
         records[2003, 'RF']['tuning']['average_tree_depth'] = 99
         with self.assertRaisesRegex(ValueError, 'depth diagnostics'):
             report_tables(records, self.cfg)
