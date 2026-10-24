@@ -1,6 +1,44 @@
 # Running experiments
 
 New dense runs save the selected fitted model for post-run Figures 4 and 5.
+
+NN local pilot (review the complete [model specification](working_notes/Neural%20Networks.md),
+including exact loss, L1 parameter set, initialization and author-unverified choices):
+
+```powershell
+uv sync --extra nn
+.venv\Scripts\python.exe -B run_experiment.py nn1 --local --sample p05 --years 1987 --cpus 4
+```
+
+`nn2` through `nn5` select the other published architectures. All use the same
+annual workflow, `list`, `resume`, `collect`, and saved-state importance interface.
+Training CSV/plots live inside each annual run. NN cluster jobs request one GPU
+per task; default concurrency is one and initial RAM request is 64G. Verify the
+small cluster deployment and live GPU quotas before a full run. CPU model GPU
+requests are rejected. NN requires its optional dependency to remain installed.
+
+SCRP A100 pilot: run from the updated project directory **on SCRP**, with the
+fixed-5% Parquet data present. Install the NN extra before preparing a run:
+
+```bash
+uv sync --extra nn
+.venv/bin/python -B run_experiment.py nn1 --scrp --sample p05 --years 1987 \
+  --parallel 1 --cpus 4 --mem 8G --time 00:30:00
+```
+
+NN SCRP jobs select `run_nn_a100_scrp.sh` automatically and request one `a100`
+GPU in the `a100` partition. The script also sets `--constraint=a100` because
+SCRP's accounting GPU label can include Hopper hardware. The first pilot's
+4 CPUs/8G/30 minutes override the full-run initial defaults. `nn3` runs the
+matching deeper-network pilot. Add `--dry-run` to inspect the submission without
+sending it to Slurm; use `resume EXPERIMENT_ID` to submit that prepared experiment.
+
+The batch log records the visible GPU, PyTorch/CUDA versions and a real matrix
+forward/backward check before fitting. Driver details are in `nvidia_smi.txt`
+beside `run.log` under `annual/logs/`. Startup fails if CUDA is unavailable or
+more/less than one GPU is visible; it does not fall back to CPU. Live SCRP quota,
+resource availability and compute-node compatibility remain to be verified there.
+
 PCR/PLS now save coefficients, intercept, feature order and fitted transforms;
 RF saves its selected trees. ENet/OLS-3 and GLM already retain their fitted state.
 Keep the complete annual checkpoints and matching prepared data. Generate

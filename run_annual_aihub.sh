@@ -10,7 +10,7 @@
 
 # Use run_experiment.py --aihub to set the array and record the submission.
 # Account, partition and QoS use site defaults unless supplied to the launcher.
-# This CPU workflow does not request a GPU.
+# The launcher supplies GPU requests for NN jobs; CPU models request none.
 set -euo pipefail
 if [[ $# != 1 || -z "${SLURM_ARRAY_TASK_ID:-}" || -z "${SLURM_CPUS_PER_TASK:-}" ]]; then
     echo "Usage: sbatch run_annual_aihub.sh EXPERIMENT_DIRECTORY" >&2
@@ -23,8 +23,9 @@ if [[ "$experiment" != /* || ! -f "$experiment/experiment.json" ]]; then
     exit 2
 fi
 python_bin="$PWD/.venv/bin/python"
-if [[ ! -x "$python_bin" || ! -x /usr/bin/time ]]; then
-    echo "Required: project .venv/bin/python and GNU /usr/bin/time." >&2
+time_bin="$HOME/.local/bin/time"
+if [[ ! -x "$python_bin" || ! -x "$time_bin" ]]; then
+    echo "Required: project .venv/bin/python and GNU time at $time_bin." >&2
     exit 2
 fi
 export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK"
@@ -41,6 +42,6 @@ echo "CPUs=$SLURM_CPUS_PER_TASK; memory=${SLURM_MEM_PER_NODE:-unknown} MiB"
 "$python_bin" -V
 "$python_bin" -B -c 'from importlib.metadata import distributions; print("\n".join(sorted(d.metadata["Name"] + "==" + d.version for d in distributions())))' > "$job_dir/packages.txt"
 "$python_bin" -B -c 'import numpy; numpy.show_config()' > "$job_dir/numpy_config.txt"
-exec /usr/bin/time -v -o "$job_dir/time.txt" \
+exec "$time_bin" -v -o "$job_dir/time.txt" \
     "$python_bin" -u -B -m core.annual_jobs run \
     --experiment "$experiment" --task-index "$SLURM_ARRAY_TASK_ID"

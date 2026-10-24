@@ -21,3 +21,12 @@ are retained for earlier pilots, memory checks, synthetic examples or existing
 run/resume commands. Do not delete or rename them while those workflows are in
 use. Create a new versioned research config only for a substantive specification
 change; select it using `--config NAME`.
+
+## Neural-network configurations
+
+`gkx_nn1_v1` defaults to the fixed 5% Parquet sample, 1987-2016 horizon,
+CUDA, and the published batch/epoch/patience/ensemble settings. NN2-NN5 inherit
+that config and select their fixed architectures. The launcher overrides sample
+and requested years as usual. Review
+[`docs/working_notes/Neural Networks.md`](../docs/working_notes/Neural%20Networks.md)
+for the exact objective, penalty normalization and implementation choices.

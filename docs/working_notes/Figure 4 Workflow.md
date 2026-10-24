@@ -51,8 +51,9 @@ Deploy the reporting modules (`core/figure4_report.py`, `core/figure4_importance
 `core/models/glm.py` dependencies with the appropriate shell script. Do not overwrite
 training sources or environments needed by active model jobs. Preserve LF line
 endings for the shell scripts (`.gitattributes` already specifies this).
-The cluster environment needs the existing project dependencies and GNU
-`/usr/bin/time`. Use the Linux `.venv/bin/python`, not a copied Windows environment.
+The cluster environment needs the existing project dependencies and GNU time:
+`/usr/bin/time` on SCRP, `$HOME/.local/bin/time` on AI Hub.
+Use the Linux `.venv/bin/python`, not a copied Windows environment.
 
 SCRP can read the original completed experiment directly; it does not need a
 copy under `scrp_imports`. For AI Hub, copy that completed experiment's `annual/years/`

@@ -24,6 +24,14 @@ def restore_predictor(tuning):
     Only explicitly recognized linear models may use the coefficient shortcut.
     """
     model = tuning["specification"]
+    if model in {"NN1", "NN2", "NN3", "NN4", "NN5"}:
+        from core.models.neural_network import NeuralNetworkRegressor
+        names = list(tuning["feature_names"])
+        state = tuning["nn_state"]
+        if not names or len(set(names)) != len(names) or len(names) != state["n_features"]:
+            raise ValueError("Invalid saved NN feature order.")
+        predictor = NeuralNetworkRegressor.from_state(state)
+        return predictor.predict, names, None
     if model not in {"OLS", "OLS_HUBER", "OLS3_HUBER", "ENET_HUBER", "PCR", "PLS", "GLM_HUBER", "RF"}:
         raise NotImplementedError(f"No saved-predictor loader for {model}; no refit will be attempted.")
     if model == "RF":
@@ -55,6 +63,9 @@ def verify_predictions(predict, window, names, record):
     """Check every saved test prediction, observation and month against local data."""
     expected = pd.DataFrame(record["predictions"])
     year, model = record["metrics"]["test_year"], record["metrics"]["specification"]
+    # Float32 CUDA and CPU kernels need not have identical rounding.
+    nn_model = model in {"NN1", "NN2", "NN3", "NN4", "NN5"}
+    atol, rtol = (1e-6, 1e-5) if nn_model else (1e-10, 1e-10)
     if (expected.empty or expected.isna().any().any() or expected.row_position.duplicated().any()
             or not expected.test_year.eq(year).all() or not expected.specification.eq(model).all()):
         raise ValueError("Invalid saved prediction identities.")
@@ -66,14 +77,14 @@ def verify_predictions(predict, window, names, record):
         if (not np.array_equal(rows.return_month.to_numpy(), batch.return_month)
                 or not np.allclose(rows.observed, batch.y, rtol=0, atol=1e-14)
                 or fitted.shape != batch.y.shape
-                or not np.allclose(rows.prediction, fitted, rtol=1e-10, atol=1e-10)):
+                or not np.allclose(rows.prediction, fitted, rtol=rtol, atol=atol)):
             raise ValueError(f"Restored predictions/observations mismatch: {model}, {year}.")
         max_error = max(max_error, float(np.max(np.abs(rows.prediction.to_numpy() - fitted))))
         count += len(rows)
     if count != len(expected) or count != record["metrics"]["n_test"]:
         raise ValueError("Test observation counts differ.")
     return dict(model=model, year=year, n_test=count, max_absolute_error=max_error,
-                prediction_atol=1e-10, prediction_rtol=1e-10)
+                prediction_atol=atol, prediction_rtol=rtol)
 
 
 def summarize_and_plot(annual, output, stamp):

@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path
@@ -40,13 +40,18 @@ def runtime_identity():
         "core/model_selection.py", "core/model_inputs.py", "core/losses.py",
         "core/optimizers.py", "core/data_query/datasets.py", "utils/general_utils.py",
         "core/batch_run.py", "core/data_query/parquet_dataset.py",
-        "core/dense_parquet_run.py", "core/dense_linear_run.py", "core/dense_glm_run.py", "core/dense_rf_run.py", "core/data_examine/pcr_memory.py",
+        "core/dense_parquet_run.py", "core/dense_linear_run.py", "core/dense_glm_run.py", "core/dense_rf_run.py", "core/nn_run.py", "core/data_examine/pcr_memory.py",
     )]
     for directory in ("core/models", "core/evaluation", "utils/config_utils"):
         paths.extend((root / directory).glob("*.py"))
+    packages = {name: version(name) for name in ("numpy", "pandas", "scipy", "PyYAML", "iopath", "pyarrow", "scikit-learn")}
+    try:
+        packages["torch"] = version("torch")
+    except PackageNotFoundError:
+        packages["torch"] = None  # NN is optional; CPU model imports do not require it.
     return {
         "python": platform.python_version(),
-        "packages": {name: version(name) for name in ("numpy", "pandas", "scipy", "PyYAML", "iopath", "pyarrow", "scikit-learn")},
+        "packages": packages,
         "source_sha256": {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                           for path in sorted(paths)},
     }

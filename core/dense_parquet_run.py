@@ -12,6 +12,10 @@ from core.run_state import read_checkpoints, resolve_run_dir, run_lock, save_che
 
 
 def run_parquet(panel, cfg, *, checkpoint_dir, stop_after_year=None, memory_snapshot=None):
+    if len(cfg.RUN.MODELS.ENABLED) == 1 and cfg.RUN.MODELS.ENABLED[0] in {"NN1", "NN2", "NN3", "NN4", "NN5"}:
+        from core.nn_run import run_parquet as run_nn
+        return run_nn(panel, cfg, checkpoint_dir=checkpoint_dir,
+                      stop_after_year=stop_after_year, memory_snapshot=memory_snapshot)
     if list(cfg.RUN.MODELS.ENABLED) == ["RF"]:
         from core.dense_rf_run import run_parquet as run_rf
         return run_rf(panel, cfg, checkpoint_dir=checkpoint_dir,

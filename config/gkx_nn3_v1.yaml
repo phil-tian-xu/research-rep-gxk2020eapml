@@ -1,0 +1,7 @@
+_BASE_: "gkx_nn1_v1.yaml"
+GENERAL:
+  NAME: "gkx_nn3_v1"
+RUN:
+  MODELS:
+    ENABLED: ["NN3"]
+  OUTPUT_DIR: "results/gkx_nn3_v1"

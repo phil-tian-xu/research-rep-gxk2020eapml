@@ -15,6 +15,7 @@ slurm-*.out
 /docs/data-support-goyal-and-welch-2008.pdf
 /docs/main_paper.pdf
 /docs/online_appendix.pdf
+/docs/presentation
 
 .obsidian/
 *.egg-info/

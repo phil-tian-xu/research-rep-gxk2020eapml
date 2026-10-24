@@ -18,8 +18,9 @@ if [[ $# == 0 || -z "${SLURM_JOB_ID:-}" || -z "${SLURM_CPUS_PER_TASK:-}" || -n "
 fi
 cd "${SLURM_SUBMIT_DIR:?Submit from the project root}"
 python_bin="$PWD/.venv/bin/python"
-if [[ ! -f core/figure4_report.py || ! -f core/figure4_importance.py || ! -x "$python_bin" || ! -x /usr/bin/time ]]; then
-    echo "Required: project root, Figure 4 modules, .venv/bin/python and GNU /usr/bin/time." >&2
+time_bin="$HOME/.local/bin/time"
+if [[ ! -f core/figure4_report.py || ! -f core/figure4_importance.py || ! -x "$python_bin" || ! -x "$time_bin" ]]; then
+    echo "Required: project root, Figure 4 modules, .venv/bin/python and GNU time at $time_bin." >&2
     exit 2
 fi
 export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK"
@@ -44,5 +45,5 @@ printf '\n'
 sha256sum core/figure4_report.py core/figure4_importance.py > "$job_dir/report_sources.sha256"
 # One process handles the selected years and writes their combined Figure 4.
 # Exit status propagates to Slurm; failed/incomplete reports remain labelled incomplete.
-exec /usr/bin/time -v -o "$job_dir/time.txt" \
+exec "$time_bin" -v -o "$job_dir/time.txt" \
     "$python_bin" -u -B -m core.figure4_report "$@"

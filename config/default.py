@@ -95,6 +95,9 @@ _C.RUN = CfgNode({
                       "TUNING": "squared_then_huber", "OBJECTIVE": "mean_half_loss"},
         "PCR": {"COMPONENT_GRID": []},
         "RF": {"N_TREES": 300, "DEPTH_GRID": [], "MAX_FEATURES_GRID": [], "SEED": 2020},
+        "NN": {"LEARNING_RATE_GRID": [], "L1_GRID": [], "BATCH_SIZE": 10000,
+               "MAX_EPOCHS": 100, "PATIENCE": 5, "ENSEMBLE_SIZE": 10,
+               "SEED": 2020, "DEVICE": "cuda", "PREDICT_BATCH_SIZE": 10000},
         "PLS": {"COMPONENT_GRID": [], "TOL": 1e-12},
     },
     "EVALUATION": {

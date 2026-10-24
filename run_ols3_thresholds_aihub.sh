@@ -16,8 +16,9 @@ if [[ -z "${SLURM_JOB_ID:-}" || -z "${SLURM_CPUS_PER_TASK:-}" || -n "${SLURM_ARR
 fi
 cd "${SLURM_SUBMIT_DIR:?Submit from the project root}"
 python_bin="$PWD/.venv/bin/python"
-if [[ ! -f core/data_examine/ols3_thresholds.py || ! -x "$python_bin" || ! -x /usr/bin/time ]]; then
-    echo "Required: project root, experiment module, .venv/bin/python, GNU time." >&2
+time_bin="$HOME/.local/bin/time"
+if [[ ! -f core/data_examine/ols3_thresholds.py || ! -x "$python_bin" || ! -x "$time_bin" ]]; then
+    echo "Required: project root, experiment module, .venv/bin/python and GNU time at $time_bin." >&2
     exit 2
 fi
 export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK"
@@ -38,5 +39,5 @@ printf ' %q' "$python_bin" -u -B -m core.data_examine.ols3_thresholds "$@"
 printf '\n'
 "$python_bin" -B -c 'import numpy; numpy.show_config()' > "$job_dir/numpy_config.txt"
 "$python_bin" -B -c 'from importlib.metadata import distributions; print("\n".join(sorted(d.metadata["Name"] + "==" + d.version for d in distributions())))' > "$job_dir/packages.txt"
-exec /usr/bin/time -v -o "$job_dir/time.txt" \
+exec "$time_bin" -v -o "$job_dir/time.txt" \
     "$python_bin" -u -B -m core.data_examine.ols3_thresholds "$@"

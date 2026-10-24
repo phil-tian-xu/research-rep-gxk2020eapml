@@ -174,11 +174,27 @@ def report_tables(records, cfg):
                         validation_loss=candidate["validation_loss"],
                         loss_above_best=candidate["validation_loss"] - scores[selected], selected=index == selected))
             complexity.append(row)
+    for model in (name for name in models if name in {"NN1", "NN2", "NN3", "NN4", "NN5"}):
+        for year in years:
+            if (year, model) not in records:
+                continue
+            tuning = records[year, model]["tuning"]
+            candidates = tuning["validation_results"]
+            scores = np.asarray([candidate["validation_loss"] for candidate in candidates])
+            if not len(scores) or not np.isfinite(scores).all():
+                raise ValueError("Invalid NN validation scores.")
+            selected = int(np.argmin(scores))
+            if candidates[selected]["params"] != tuning["best_params"]:
+                raise ValueError("NN selected parameters disagree with validation scores.")
+            for index, candidate in enumerate(candidates):
+                curves.append(dict(model=model, test_year=year, learning_rate=candidate["params"]["learning_rate"],
+                    l1=candidate["params"]["l1"], validation_loss=candidate["validation_loss"],
+                    loss_above_best=candidate["validation_loss"] - scores[selected], selected=index == selected))
     return (pd.DataFrame(table), pd.DataFrame(complexity),
             pd.DataFrame(curves, columns=["model", "test_year", "requested_components", "fitted_components",
                                          "validation_loss", "loss_above_best", "selected", "penalty_strength",
                                          "nonzero_slopes", "active_groups", "huber_delta", "iterations", "stationarity",
-                                         "max_depth", "max_features", "average_tree_depth"]))
+                                         "max_depth", "max_features", "average_tree_depth", "learning_rate", "l1"]))
 
 
 def plot_complexity(complexity, cfg, output):

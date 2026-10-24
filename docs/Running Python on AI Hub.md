@@ -31,6 +31,11 @@ Compute nodes have no internet, so install dependencies before submission.
 
 ## Separate checkout, environment and data
 
+AI Hub batch scripts require GNU time at `$HOME/.local/bin/time`, the user-installed
+executable verified on a compute node. SCRP scripts use `/usr/bin/time`.
+The AI Hub annual, Figure 4 and OLS3 threshold scripts check and invoke the
+user-installed path explicitly; adding it to `PATH` is not required.
+
 Place a separate copy of the project under your verified `/hpchome` storage.
 Keep prepared data at the same repository-relative paths:
 

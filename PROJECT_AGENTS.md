@@ -64,6 +64,40 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+SCRP NN A100 submission (2026-10-24): new `run_nn_a100_scrp.sh` is selected
+automatically for NN1-NN5 `--scrp` launches. Defaults to partition `a100`, one
+typed `a100` GPU and the documented `a100` node constraint. Logs GPU/driver and
+PyTorch/CUDA information and verifies one visible GPU plus a real CUDA matrix
+forward/backward pass before the unchanged annual worker. First cluster test:
+`run_experiment.py nn1 --scrp --sample p05 --years 1987 --parallel 1 --cpus 4
+--mem 8G --time 00:30:00` from the SCRP project root after `uv sync --extra nn`.
+NN full-run initial RAM/time defaults remain 64G/12h. CPU and AI Hub dispatch
+remain separate. All 23 launcher tests passed and a real local dry-run preserved
+the pilot/model settings and generated the expected A100 request; no cluster job
+was submitted. See `docs/Running Experiments.md` for the command and log locations.
+
+Neural networks (2026-10-24): `run_experiment.py nn1` through `nn5` now use
+the existing local/SCRP/AI Hub annual workflow. Model/training code is in
+`core/models/neural_network.py`; annual selection in `core/nn_run.py`. Review
+`docs/working_notes/Neural Networks.md` for the exact mean-half-MSE plus dense-kernel
+L1 objective, initialization, BN-after-ReLU, Adam, early stopping, ensemble tuning,
+precision, seeds, and explicit author-unverified implementation choices. Configs
+`gkx_nn1_v1` through `gkx_nn5_v1` default to the fixed 5% sample and CUDA; install
+the optional pinned dependency with `uv sync --extra nn` (PyTorch 2.13.0, CUDA 13.0).
+Single-GPU Slurm requests are supported; NN concurrency defaults to one. Existing
+CPU commands do not request GPUs. New execution hashes require fresh experiments;
+preserve older remote environments/checkouts for their existing resumes.
+All 220 tests passed. Real local RTX 5080 full-grid, ten-seed pilots for 1987:
+`nn1_p05_1987-1987_20261024T131639296733Z`, test R2=-2.367893%;
+`nn3_p05_1987-1987_20261024T132334325467Z`, test R2=-0.605856%.
+Both learned nonconstant predictions and changed all selected seeds' parameters,
+but neither beat zero forecasts in that test year; do not call this successful
+predictive replication. Each selected LR=.01, L1=.001 (both grid upper endpoints).
+CPU-restored states verified all 3,892 saved CUDA test forecasts within 3.532e-7
+for NN1 and 1.550e-7 for NN3; real completed-year resumes skipped fitting.
+No NN2/NN4/NN5 real-panel fits or remote NN submissions were run. Cluster numerical
+checks and full-period/full-sample results remain pending. Phil-only tracker untouched.
+
 OLS-3 threshold sensitivity (2026-09-28): separate
 `python -B -m core.data_examine.ols3_thresholds --sample full --years 1987 1988 2011 2012`
 compares .999 quantiles of training absolute OLS-3 residuals, absolute returns,
@@ -179,6 +213,11 @@ it is not an approved empirical GLM specification or integrated production model
 Python numerical checks passed. Phil ran MATLAB R2026b; saved reference_v1
 comparison passed all checks, with Huber test predictions within 4.45e-16.
 See `docs/working_notes/GLM MATLAB Comparison.md`. Keep existing runs unchanged.
+
+AI Hub GNU time path correction (2026-09-29): the annual, Figure 4 and OLS3
+threshold AI Hub shell scripts check and invoke `$HOME/.local/bin/time`, which
+Phil verified on a compute node. SCRP scripts retain `/usr/bin/time`.
+This local script change does not alter research settings or submit remote jobs.
 
 AI Hub deployment preparation (2026-09-27): `run_experiment.py --aihub` uses
 the separate `run_annual_aihub.sh`, backend record and default root

@@ -73,6 +73,26 @@ class ExperimentLauncherTests(unittest.TestCase):
         self.assertEqual(record["submissions"][-1]["state"], "submitted")
         self.assertTrue(Path(command[-2]).exists())
 
+    def test_nn_gpu_requests_and_model_config_are_preserved(self):
+        for backend, gpu_flag in (("--scrp", "--gpus=a100:1"), ("--aihub", "--gres=gpu:1")):
+            folder = self.prepare("nn3", backend, "1987", "p05")
+            record = launcher.read_launch(folder)
+            _, plan = load_plan(folder / "annual")
+            self.assertEqual(plan["config"]["RUN"]["MODELS"]["ENABLED"], ["NN3"])
+            self.assertEqual(plan["config"]["RUN"]["MODELS"]["NN"]["ENSEMBLE_SIZE"], 10)
+            self.assertEqual(record["resources"]["parallel"], 1)
+            self.assertEqual(record["resources"]["gpus"], 1)
+            self.assertIn(gpu_flag, record["submissions"][0]["sbatch_command"])
+            command = record["submissions"][0]["sbatch_command"]
+            if backend == "--scrp":
+                self.assertIn("--partition=a100", command)
+                self.assertEqual(Path(command[-2]).name, "run_nn_a100_scrp.sh")
+                self.assertIn(b"#SBATCH --constraint=a100", Path(command[-2]).read_bytes())
+            else:
+                self.assertEqual(Path(command[-2]).name, "run_annual_aihub.sh")
+        with self.assertRaisesRegex(ValueError, "unused GPUs"):
+            launcher.main(["pcr", "--scrp", "--sample", "p05", "--years", "1987", "--gpus", "1", "--dry-run"])
+
     def test_submission_failure_is_recorded_and_can_be_retried(self):
         folder = self.prepare()
         error = subprocess.CalledProcessError(1, ["sbatch"], stderr="Invalid account")
@@ -83,6 +103,22 @@ class ExperimentLauncherTests(unittest.TestCase):
         with patch("run_experiment.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "123\n", "")):
             launcher.main(["resume", str(folder)])
         self.assertEqual(launcher.read_launch(folder)["submissions"][-1]["job_id"], "123")
+
+    def test_a100_pilot_resources_survive_resume_without_changing_nn_settings(self):
+        folder = self.prepare("nn1", "--scrp", "1987", "p05")
+        research = (folder / "research.yaml").read_bytes()
+        launcher.main(["resume", str(folder), "--cpus", "4", "--mem", "8G",
+                       "--time", "00:30:00", "--dry-run"])
+        record = launcher.read_launch(folder)
+        self.assertEqual((folder / "research.yaml").read_bytes(), research)
+        self.assertEqual(record["resources"]["partition"], "a100")
+        self.assertEqual(record["resources"]["gpus"], 1)
+        command = record["submissions"][-1]["sbatch_command"]
+        for flag in ("--gpus=a100:1", "--partition=a100", "--cpus-per-task=4",
+                     "--mem=8G", "--time=00:30:00", "--array=0%1"):
+            self.assertIn(flag, command)
+        self.assertEqual(Path(command[-2]).name, "run_nn_a100_scrp.sh")
+        self.assertEqual(record["submissions"][-1]["state"], "prepared")
 
     def test_uncertain_submission_cannot_be_blindly_retried(self):
         folder = self.prepare()
@@ -177,7 +213,9 @@ class ExperimentLauncherTests(unittest.TestCase):
                 self.assertNotIn(b"\r", script)
                 self.assertNotIn(b"#SBATCH --gres", script)
                 scrp_command = launcher.read_launch(scrp)["submissions"][-1]["sbatch_command"]
-                for flag in ("--account=pg", "--partition=scrp", "--qos=c32g4", "--array=0%4"):
+                parallel = 1 if model.startswith("nn") else 4
+                partition = "a100" if model.startswith("nn") else "scrp"
+                for flag in ("--account=pg", f"--partition={partition}", "--qos=c32g4", f"--array=0%{parallel}"):
                     self.assertIn(flag, scrp_command)
 
     def test_aihub_resume_preserves_backend_overrides_and_dependency(self):

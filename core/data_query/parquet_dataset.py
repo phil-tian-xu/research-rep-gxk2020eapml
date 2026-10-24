@@ -20,13 +20,15 @@ class PanelBatch:
     return_month: np.ndarray
 
 
-def load_window(panel, first_year, last_year, *, feature_columns=None):
+def load_window(panel, first_year, last_year, *, feature_columns=None, feature_dtype=np.float64):
     """Fill ordinary arrays from Parquet pieces; return the complete window."""
     window = panel.window(first_year, last_year)
     selected = panel.features if feature_columns is None else list(feature_columns)
     if not selected or len(selected) != len(set(selected)) or not set(selected) <= set(panel.features):
         raise ValueError("Select unique feature columns present in the panel.")
-    X = np.empty((window.n_rows, len(selected)), dtype=np.float64)
+    if np.dtype(feature_dtype) not in (np.dtype("float32"), np.dtype("float64")):
+        raise ValueError("Feature arrays must use float32 or float64.")
+    X = np.empty((window.n_rows, len(selected)), dtype=feature_dtype)
     y = np.empty(window.n_rows, dtype=np.float64)
     positions = np.empty(window.n_rows, dtype=np.int64)
     months = np.empty(window.n_rows, dtype="U7")
