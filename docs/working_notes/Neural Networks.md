@@ -237,6 +237,36 @@ candidates/seeds, and `NN1_training.png` for the selected candidate. The pooled
 Table 1 evaluation is reused. There is no Figure 3 complexity curve for these
 fixed architectures, consistent with the paper's explanation.
 
+## Combined runs and training diagnostics (2026-10-25)
+
+Disjoint NN year ranges can share one combined ID while retaining separate GPU
+requests. See [the run guide](../Running%20Experiments.md#split-gpus-one-experiment-id)
+for preparation, submission, status, resume, collection and saved-fit reporting.
+The grouping and reporting layer does not alter the NN model, optimizer, loss,
+grid, seed rule, annual windows, precision or existing training checkpoints.
+
+`annual/combined/nn_training_summary.csv` puts each selected member's initialization,
+retained epoch and last executed epoch side by side. `retained_train_mse` and
+`retained_validation_mse` are evaluation-mode, unpenalized MSEs at that member's
+best validation epoch, not the final epoch or the online penalized training loss.
+`best_validation_loss` in annual metrics remains the **ensemble** validation MSE;
+it need not equal the mean of member validation MSEs. L1 is applied to dense kernels
+in the training objective; nonzero weights alone do not establish useful learning.
+
+Every retained epoch must agree with its saved validation history and seed/member
+identity. Flags include zero parameter update, all dense weights zero, constant
+training predictions and retained training MSE not below initialization. These
+are diagnostic flags, not automatic exclusion rules. Negative out-of-sample R2
+is reported unchanged. Review forecast dispersion and zero/training-mean baseline
+comparisons alongside learning curves before interpreting economic performance.
+
+`year_sources.csv` links the original per-year `NN1_training.csv` (all grid
+candidates and members) and `NN1_training.png` (selected ensemble curves). The
+checkpoint remains authoritative and contains all histories and retained weights.
+Collection validates and pools forecasts without retraining or loading features.
+Histories are still saved at annual completion; this change does not provide
+live epoch streaming or within-epoch restart.
+
 ## Sources
 
 - [Published paper](https://academic.oup.com/rfs/article/33/5/2223/5758276), Section 1.7 and Equations (17)-(18).

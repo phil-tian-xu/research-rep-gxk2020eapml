@@ -64,6 +64,116 @@ these commands on SCRP; no model source or environment update is required.
 AI Hub keeps its default untyped GPU request; an explicit GPU type is passed
 through as `--gres=gpu:TYPE:1` and must match that cluster's configured labels.
 
+## Split GPUs, one experiment ID
+
+Prepare disjoint year ranges with their own resource requests, then register them
+with `combine`. This can happen before fitting or after sources have started.
+The combined ID supports `status`, `resume`, `collect`, and saved-fit Figures 4/5.
+Sources must use the same backend, research settings and recorded fitting
+code/environment. GPU models and scheduling resources may differ.
+
+Deploy `run_experiment.py`, the new `core/combined_experiments.py` and
+`core/figure4_report.py` together. This change requires no environment update or
+replacement of fitting sources or `core/annual_jobs.py`; existing prepared runs
+retain their fitting hashes. Keep the generic NN worker script already deployed.
+
+For the first check, use **p05 and 1987/1988**, one GPU in each pool. After that
+passes on SCRP, this is the full-universe example (Bash on SCRP):
+
+```bash
+# Prepare only: no jobs are submitted by these two commands.
+.venv/bin/python -B run_experiment.py nn1 --scrp --sample full \
+  --years 1987:2006 --gpu-type rtx3090 --gpus 1 --parallel 2 \
+  --cpus 8 --mem 96G --time 12:00:00 --dry-run
+.venv/bin/python -B run_experiment.py nn1 --scrp --sample full \
+  --years 2007:2016 --gpu-type a100 --gpus 1 --parallel 2 \
+  --cpus 8 --mem 96G --time 12:00:00 --dry-run
+
+# Substitute the two IDs printed above.
+early="nn1_full_1987-2006_REPLACE_WITH_TIMESTAMP"
+late="nn1_full_2007-2016_REPLACE_WITH_TIMESTAMP"
+.venv/bin/python -B run_experiment.py combine "$early" "$late" --years 1987:2016
+
+# Substitute the combined ID printed by combine. Use this ID from here onward.
+run="combined_nn1_full_1987-2016_REPLACE_WITH_TIMESTAMP"
+.venv/bin/python -B run_experiment.py resume "$run"
+.venv/bin/python -B run_experiment.py status "$run"
+.venv/bin/python -B run_experiment.py status "$run" --refresh
+.venv/bin/python -B run_experiment.py collect "$run"
+```
+
+This permits two 3090 tasks plus two A100 tasks concurrently: at most four GPUs,
+32 CPUs and 384G requested RAM across these arrays. Each array retains its own
+`--parallel 2`. The year boundary is an allocation choice; each year's training
+and validation windows remain exactly those in the research configuration.
+Check current cluster quotas/availability before submitting; 96G is an allocation,
+not a measured NN requirement. For AI Hub, use `--aihub` for preparation and ID
+lookup; combined pools must jointly fit its existing per-user resource limits.
+
+`resume "$run"` submits only unfinished sources that are not already queued or
+running. It refuses uncertain submission receipts. It retains each source's saved
+GPU/concurrency request; resource overrides belong on `resume SOURCE_ID`, not on
+combined resume. If all checkpoints are present, combined resume collects them.
+Ordinary `status` reads local files and works without `sacct`; `--refresh` also
+queries the scheduler. SCRP submissions still need a later explicit `collect`
+after the arrays finish. No background monitor is installed.
+
+For two sources already running or completed, `combine` works the same way.
+Alternatively, this registers a combined ID and immediately attempts collection:
+
+```bash
+.venv/bin/python -B run_experiment.py collect "$early" "$late" --years 1987:2016
+```
+
+Collection requires every expected year exactly once, matching configurations,
+recorded execution/data identities and feature order, valid checkpoint checksums,
+finite dated predictions, consistent counts, recomputed MSE/R2 and validation
+selection. Overlapping sources are rejected; it never chooses a fit by test R2.
+It pools squared forecast errors and observed returns squared across all years;
+it does not average annual or source R2 values. A repeated combined collect
+revalidates the sources and returns the existing report.
+
+Reports live in `EXPERIMENT_ROOT/COMBINED_ID/annual/combined/`:
+
+- `table1_all.csv`, `annual_metrics.csv`, `complexity.csv`, `tuning_curves.csv`:
+  usual pooled and annual diagnostics, with source IDs and selected parameters.
+- `nn_training_summary.csv`: one row per retained member of each year's selected
+  NN ensemble: initial/retained/final losses, best epoch, stopping reason,
+  parameter change, nonzero weights and prediction dispersion.
+- `year_sources.csv`: original run/checkpoint paths, checkpoint hashes, GPU
+  identity, recorded submission resources and links to original training CSV/PNG.
+- `source_identity.json`, `validation_summary.json`: frozen source plans,
+  data/features, provenance and integrity-check outcome.
+
+Negative R2 and training warning flags remain visible; they are not reasons to
+discard a year. The full candidate histories and weights remain in their original
+checkpoints. Keep both source directories: the combined run references them and
+does not copy the fits. Within the same results root, `remove SOURCE_ID` refuses
+a source referenced by a live combined run. If using different roots, preserve
+those referenced sources yourself. Removing the combined ID archives its descriptor/reports and leaves
+the original sources intact. Existing single-experiment collect remains supported.
+
+For Figure 4, pass the combined experiment **directory** to the existing tool;
+it resolves the original saved fit for each year. Figure 5 then uses Figure 4's
+annual scores as usual:
+
+```bash
+exp_root="/data/users/s1155269217/GKX2020/results/experiments"
+sbatch run_figure4_scrp.sh --experiment "$exp_root/$run" \
+  --data-dir /data/users/s1155269217/GKX2020/data/processed/gkx_parquet --years 1987:2016
+```
+
+Figure 4 can require substantial computation and panel reads; use the established
+[Figures 4/5 cluster workflow](working_notes/Figure%204%20Workflow.md) for allocation
+and verify your deployed data directory. Collect itself never loads the panel.
+
+Local verification on 2026-10-25: 231 tests passed, including split/unsplit tiny NN
+equivalence and Figure 4/5 reporting. A separate real p05 1987/1988 normal-launcher
+smoke passed with one candidate, two members and three epochs per member; see
+`results/combined_nn_smoke_20261025T151747000531Z/verification.json`. This reduced
+budget checks infrastructure only. SCRP/AI Hub submission was mocked; remote
+execution remains for Phil to verify.
+
 PCR/PLS now save coefficients, intercept, feature order and fitted transforms;
 RF saves its selected trees. ENet/OLS-3 and GLM already retain their fitted state.
 Keep the complete annual checkpoints and matching prepared data. Generate

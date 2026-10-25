@@ -18,6 +18,11 @@ models with saved fitted state. Each experiment must have the annual-run folder
 layout. Ambiguous/missing annual runs and duplicate models are rejected.
 `--data-dir`, `--output-root`, and `--batch-size` optionally override defaults.
 
+Combined experiment directories created by `run_experiment.py combine` are also
+accepted. Pass the combined directory as one experiment; its frozen year ownership
+resolves each original annual fit. Keep all original source directories available.
+Figure 5 consumes the resulting full-horizon Figure 4 report in the usual way.
+
 Each invocation creates `results/replication_comparison/<timestamp>/figure4/`:
 
 - `<model>.png` and `.svg`: top 20 groups, or all groups when fewer than 20 exist.
@@ -47,6 +52,7 @@ availability have not been queried. On SCRP, inspect `qos` and `scrp-info`; on
 AI Hub, inspect `sinfo` and your account association as described in the AI Hub run guide.
 
 Deploy the reporting modules (`core/figure4_report.py`, `core/figure4_importance.py`,
+`core/combined_experiments.py`,
 `core/figure5_report.py`) and their `core/models/saved_fit.py` and
 `core/models/glm.py` dependencies with the appropriate shell script. Do not overwrite
 training sources or environments needed by active model jobs. Preserve LF line

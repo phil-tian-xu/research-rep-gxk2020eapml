@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from core.data_query.parquet_dataset import ParquetPanel
+from core.combined_experiments import resolve_annual_run
 from core.figure4_importance import characteristic_groups, streaming_zero_out
 from core.models.saved_fit import restore_forest, restore_spline
 from core.run_state import dataset_identity, load_run_config, read_checkpoints
@@ -141,12 +142,9 @@ def make_report(experiments, data_dir, output_root, years, batch_size=10000):
             folder = folder / "annual"
         experiment_model, common_groups = None, None
         for year in years:
-            runs = sorted((folder / "years" / str(year)).glob("*/manifest.json"))
-            if len(runs) != 1:
-                raise ValueError(f"Expected one annual run for {folder}, {year}; found {len(runs)}.")
-            run = runs[0].parent
+            run = resolve_annual_run(experiment, year)
             cfg = load_run_config(run)
-            manifest = json.loads(runs[0].read_text(encoding="utf-8"))
+            manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
             if manifest["dataset"] != local_identity:
                 raise ValueError(f"Local data identity differs from saved fit: {run}")
             records = read_checkpoints(run, cfg, lazy=True)

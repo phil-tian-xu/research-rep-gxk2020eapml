@@ -16,6 +16,7 @@ import subprocess
 import sys
 
 from core.annual_jobs import collect, load_plan, prepare
+from core.combined_experiments import combination_plan, load_combination, collect_combination
 from core.data_query.datasets import DATASET_PATHS
 from core.run_state import atomic_write, load_run_config, read_checkpoints, run_lock, runtime_identity
 from utils.general_utils import load_config
@@ -191,16 +192,96 @@ def saved_years(folder, *, verify=False):
     return saved
 
 
-def ensure_inactive(record):
+def active_jobs(record):
     jobs = [s["job_id"] for s in record["submissions"] if s.get("job_id")]
     if any(s["state"] in {"submitting", "unknown"} for s in record["submissions"]):
         raise ValueError("An earlier submission has an uncertain outcome. Reconcile it with Slurm before retrying.")
+    if any(s["state"] == "submitted" and not s.get("job_id") for s in record["submissions"]):
+        raise ValueError("Submitted job ID is missing; reconcile its status before retrying.")
     if not jobs:
-        return
+        return set()
     result = subprocess.run(["squeue", "--noheader", "--user", getpass.getuser(), "--format=%F"],
                             check=True, capture_output=True, text=True, timeout=30)
-    if set(result.stdout.split()) & set(jobs):
+    return set(result.stdout.split()) & set(jobs)
+
+
+def ensure_inactive(record):
+    if active_jobs(record):
         raise ValueError("This experiment still has queued/running Slurm tasks. Wait for them before resuming.")
+
+
+def combine_experiments(values, args):
+    parents = [resolve_experiment(value, args.root, aihub=args.aihub) for value in values]
+    if args.years is None:
+        raise ValueError("Combining experiments requires --years FIRST:LAST to declare the expected coverage.")
+    plan = combination_plan(parents, args.years)
+    launches = [read_launch(parent) for parent in parents]
+    if len({r["backend"] for r in launches}) != 1:
+        raise ValueError("A combined run must use one execution backend; prepare its sources on the same cluster.")
+    if len({r["sample"] for r in launches}) != 1:
+        raise ValueError("Source sample labels differ.")
+    validate_combined_resources(launches)
+    for source, record in zip(plan["sources"], launches):
+        expected_model, = source["plan"]["config"]["RUN"]["MODELS"]["ENABLED"]
+        if record["model"] != expected_model or record["years"] != [source["plan"]["years"][0], source["plan"]["years"][-1]]:
+            raise ValueError("Source launch record disagrees with its annual plan.")
+    first = launches[0]
+    run_id = f"combined_{first['model'].lower()}_{first['sample']}_{args.years[0]}-{args.years[1]}_{timestamp()}"
+    folder = results_root(args.root, scrp=first["backend"] == "scrp", aihub=first["backend"] == "aihub") / run_id
+    folder.mkdir(parents=True, exist_ok=False)
+    atomic_write(folder / "collection.json", json.dumps(plan, indent=2))
+    record = dict(schema_version=1, kind="combined", id=run_id, model=first["model"],
+                  sample=first["sample"], years=list(args.years), backend=first["backend"],
+                  created_utc=timestamp(), resources={}, submissions=[])
+    atomic_write(folder / "launch.json", json.dumps(record, indent=2))
+    print(f"Combined experiment: {folder}\nID: {run_id}", flush=True)
+    return folder
+
+
+def validate_combined_resources(records):
+    if records[0]["backend"] == "aihub":
+        options = [r["resources"] for r in records]
+        memory = sum(o["parallel"] * int(o["mem"][:-1]) * (1024 if o["mem"][-1] == "G" else 1) for o in options)
+        cpus = sum(o["parallel"] * o["cpus"] for o in options)
+        gpus = sum(o["parallel"] * o["gpus"] for o in options)
+        if memory > 240 * 1024 or cpus > 60 or gpus > 4:
+            raise ValueError("Combined AI Hub resource pools exceed the 240G/60-CPU/four-GPU per-user budget.")
+
+
+def resume_combination(folder, args, argv):
+    overrides = ("parallel", "cpus", "mem", "time", "account", "partition", "qos", "gpus", "gpu_type")
+    if any(getattr(args, key, None) is not None for key in overrides):
+        raise ValueError("Combined resume preserves each source's resources. Change resources with resume SOURCE_ID first.")
+    with run_lock(folder):
+        plan = load_combination(folder)
+        if args.aihub and read_launch(folder)["backend"] != "aihub":
+            raise ValueError("--aihub cannot resume an experiment from another backend.")
+        validate_combined_resources([read_launch(Path(s["experiment"])) for s in plan["sources"]])
+        current_runtime = runtime_identity()
+        orchestrator = hashlib.sha256((ROOT / "core" / "annual_jobs.py").read_bytes()).hexdigest()
+        pending = []
+        # Preflight every source before any submission; one uncertain receipt stops the run.
+        for source in plan["sources"]:
+            parent = Path(source["experiment"])
+            source_plan, record = source["plan"], read_launch(parent)
+            completed = saved_years(parent, verify=True)
+            if completed == source_plan["years"]:
+                continue
+            if source_plan["runtime"] != current_runtime or source_plan["orchestrator_sha256"] != orchestrator:
+                raise ValueError("Execution code/environment changed; use the original checkout/environment to resume.")
+            if record["backend"] == "local":
+                if any(s["state"] in {"running", "submitting", "unknown"} for s in record["submissions"]):
+                    raise ValueError("A local source is running or uncertain; reconcile it before resuming.")
+            elif not args.dry_run and active_jobs(record):
+                print(f"Source already queued/running; skipped: {parent.name}")
+                continue
+            pending.append(parent)
+        for parent in pending:
+            execute(parent, argparse.Namespace(**vars(args)), argv)
+    if not args.dry_run and all(saved_years(Path(s["experiment"])) == s["plan"]["years"] for s in plan["sources"]):
+        collect_combination(folder)
+    else:
+        print(f"Track this combined ID with status; collect when complete: {folder.name}")
 
 
 def execute(folder, args, argv):
@@ -343,17 +424,28 @@ def scheduler_states(job_ids):
         return {job: "unknown" for job in job_ids}
 
 
-def list_experiments(root, refresh=False):
+def list_experiments(root, refresh=False, experiment=None):
     rows = []
-    for path in sorted(root.glob("*/launch.json")):
+    paths = [experiment / "launch.json"] if experiment else sorted(root.glob("*/launch.json"))
+    for path in paths:
         try:
             record = read_launch(path.parent)
+            if record.get("kind") == "combined":
+                plan = load_combination(path.parent)
+                parents = [Path(s["experiment"]) for s in plan["sources"]]
+                submissions = [s for parent in parents for s in read_launch(parent)["submissions"]]
+                saved = sum(len(saved_years(parent)) for parent in parents)
+                action = "combined"
+            else:
+                submissions = record["submissions"]
+                saved = len(saved_years(path.parent))
+                action = submissions[-1]["state"] if submissions else "prepared"
             rows.append({"experiment": record["id"], "model": record["model"], "sample": record["sample"],
                          "years": f"{record['years'][0]}:{record['years'][1]}",
-                         "saved": f"{len(saved_years(path.parent))}/{record['years'][1]-record['years'][0]+1}",
+                         "saved": f"{saved}/{record['years'][1]-record['years'][0]+1}",
                          "reports": "ready" if (path.parent / "annual/combined/source_identity.json").is_file() else "pending",
-                         "last_action": record["submissions"][-1]["state"] if record["submissions"] else "prepared",
-                         "job_ids": ",".join(s["job_id"] for s in record["submissions"] if s.get("job_id")),
+                         "last_action": action,
+                         "job_ids": ",".join(s["job_id"] for s in submissions if s.get("job_id")),
                          "path": str(path.parent)})
         except (OSError, ValueError, KeyError, TypeError) as error:
             print(f"Could not inspect {path}: {error}", file=sys.stderr)
@@ -382,6 +474,11 @@ def remove_experiment(value, root=None, *, aihub=False):
     folder = source.resolve()
     if not folder.is_dir():
         raise ValueError(f"Experiment not found: {value}. Use list or provide its full path.")
+    for descriptor in root.glob("*/collection.json"):
+        if descriptor.parent != folder:
+            plan = json.loads(descriptor.read_text(encoding="utf-8"))
+            if any(Path(s["experiment"]).resolve() == folder for s in plan["sources"]):
+                raise ValueError(f"Source is referenced by {descriptor.parent.name}; archive the combined run first.")
     archive = root.with_name(root.name + "_archive")
     if archive.is_symlink():
         raise ValueError("The archive directory must not be a symlink.")
@@ -466,9 +563,20 @@ def parser():
     listing.add_argument("--aihub", action="store_true")
     listing.add_argument("--refresh", action="store_true", help="Also query Slurm; otherwise read saved records only.")
     report = commands.add_parser("collect")
-    report.add_argument("experiment")
+    report.add_argument("experiment", nargs="+")
+    report.add_argument("--years", type=year_range, help="Required when combining multiple source experiments.")
     report.add_argument("--root")
     report.add_argument("--aihub", action="store_true")
+    combination = commands.add_parser("combine", help="Register disjoint source experiments as one logical run, before or after fitting.")
+    combination.add_argument("experiment", nargs="+")
+    combination.add_argument("--years", type=year_range, required=True)
+    combination.add_argument("--root")
+    combination.add_argument("--aihub", action="store_true")
+    status = commands.add_parser("status", help="Inspect one experiment or combined run.")
+    status.add_argument("experiment")
+    status.add_argument("--root")
+    status.add_argument("--aihub", action="store_true")
+    status.add_argument("--refresh", action="store_true")
     removal = commands.add_parser("remove", help="Move one inactive experiment to the sibling archive directory.")
     removal.add_argument("experiment", help="Exact folder name or absolute path under the results root.")
     removal.add_argument("--root")
@@ -485,10 +593,22 @@ def main(argv=None):
         raise ValueError("--after applies only to Slurm submissions.")
     if args.command == "list":
         return list_experiments(results_root(args.root, aihub=args.aihub), args.refresh)
+    if args.command == "status":
+        folder = resolve_experiment(args.experiment, args.root, aihub=args.aihub)
+        return list_experiments(folder.parent, args.refresh, folder)
+    if args.command == "combine":
+        return combine_experiments(args.experiment, args)
     if args.command == "remove":
         return remove_experiment(args.experiment, args.root, aihub=args.aihub)
     if args.command == "collect":
-        folder = resolve_experiment(args.experiment, args.root, aihub=args.aihub)
+        folder = (combine_experiments(args.experiment, args) if len(args.experiment) > 1 else
+                  resolve_experiment(args.experiment[0], args.root, aihub=args.aihub))
+        if (folder / "collection.json").is_file():
+            if args.years and list(args.years) != read_launch(folder)["years"]:
+                raise ValueError("Requested years differ from the combined run's fixed horizon.")
+            return collect_combination(folder)
+        if args.years:
+            raise ValueError("--years applies to combined collection; a single source uses its saved horizon.")
         if (folder / "annual/combined/source_identity.json").is_file():
             print(f"Reports already saved: {folder / 'annual/combined'}")
         else:
@@ -496,7 +616,10 @@ def main(argv=None):
         return
     folder = (resolve_experiment(args.experiment, args.root, aihub=args.aihub) if args.command == "resume"
               else prepare_experiment(args, argv))
-    execute(folder, args, argv)
+    if (folder / "collection.json").is_file():
+        resume_combination(folder, args, argv)
+    else:
+        execute(folder, args, argv)
     return folder
 
 

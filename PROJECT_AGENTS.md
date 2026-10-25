@@ -64,6 +64,29 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+Combined experiments (2026-10-25): `run_experiment.py combine SOURCE1 SOURCE2
+--years FIRST:LAST` registers disjoint source plans before or after fitting.
+The returned combined ID supports status/resume/collect and Figures 4/5. Resume
+preserves each source's resources, skips completed/active sources and rejects
+uncertain submission receipts; resource changes use the original source ID.
+`collect SOURCE1 SOURCE2 --years FIRST:LAST` also registers and collects a group.
+The new `core/combined_experiments.py` validates fixed coverage, config/runtime/
+dataset/features, checkpoint hashes, predictions/counts/dates, recomputed MSE/R2
+and selected validation results. Pooled R2 sums errors and return squares across
+years. Original fits stay in place; the combined descriptor references them.
+Outputs include annual metrics, NN retained-member training diagnostics, source
+provenance and validation summary. Zero updates/weights and poor performance are
+diagnostic flags, not reasons to choose another fit. See the primary run guide.
+No fitting sources, annual orchestration or fitting runtime hashes changed.
+Verification: all 231 tests passed (43.762s), including actual tiny NN split/
+unsplit pooled equivalence, mocked separate 3090/A100 submission pools, retry
+guards, corrupt/missing/duplicate/incompatible sources, and Figures 4/5.
+A real p05 1987/1988 normal-launcher smoke completed locally on the RTX 5080:
+`results/combined_nn_smoke_20261025T151747000531Z/verification.json`.
+It deliberately used one grid candidate, two seeds and three epochs solely to
+check infrastructure; its poor scores are not replication results. Production
+NN settings remain unchanged. No cluster jobs submitted. The tracker is Phil-only.
+
 Selectable NN cluster GPUs (2026-10-25): `run_experiment.py` now accepts
 `--gpu-type a100/rtx3090/rtx3060/any`; `--gpus 1` remains the per-year allocation
 and `--parallel N` controls concurrent annual jobs / maximum total GPUs.
