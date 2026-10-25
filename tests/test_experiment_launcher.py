@@ -86,9 +86,11 @@ class ExperimentLauncherTests(unittest.TestCase):
             command = record["submissions"][0]["sbatch_command"]
             if backend == "--scrp":
                 self.assertIn("--partition=a100", command)
-                self.assertEqual(Path(command[-2]).name, "run_nn_a100_scrp.sh")
-                self.assertIn(b"#SBATCH --constraint=a100", Path(command[-2]).read_bytes())
+                self.assertEqual(record["resources"]["gpu_type"], "a100")
+                self.assertEqual(Path(command[-2]).name, "run_nn_scrp.sh")
+                self.assertIn("--constraint=a100", command)
             else:
+                self.assertEqual(record["resources"]["gpu_type"], "any")
                 self.assertEqual(Path(command[-2]).name, "run_annual_aihub.sh")
         with self.assertRaisesRegex(ValueError, "unused GPUs"):
             launcher.main(["pcr", "--scrp", "--sample", "p05", "--years", "1987", "--gpus", "1", "--dry-run"])
@@ -117,8 +119,84 @@ class ExperimentLauncherTests(unittest.TestCase):
         for flag in ("--gpus=a100:1", "--partition=a100", "--cpus-per-task=4",
                      "--mem=8G", "--time=00:30:00", "--array=0%1"):
             self.assertIn(flag, command)
-        self.assertEqual(Path(command[-2]).name, "run_nn_a100_scrp.sh")
+        self.assertEqual(Path(command[-2]).name, "run_nn_scrp.sh")
+        self.assertIn("--constraint=a100", command)
         self.assertEqual(record["submissions"][-1]["state"], "prepared")
+
+    def test_four_3090_jobs_preserve_full_research_settings_and_resume_resources(self):
+        baseline = self.prepare("nn1", "--scrp", "1987:2016", "full")
+        folder = launcher.main(["nn1", "--scrp", "--sample", "full", "--years", "1987:2016",
+                               "--gpu-type", "rtx3090", "--gpus", "1", "--parallel", "4",
+                               "--cpus", "8", "--mem", "96G", "--time", "12:00:00",
+                               "--root", str(self.root / "results"), "--dry-run"])
+        research = (folder / "research.yaml").read_bytes()
+        self.assertEqual(research, (baseline / "research.yaml").read_bytes())
+        _, plan = load_plan(folder / "annual")
+        self.assertEqual(plan["years"], list(range(1987, 2017)))
+        self.assertEqual(plan["config"]["DATA"]["DATASET"], "gkx_parquet")
+        with patch("run_experiment.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "123\n", "")) as run:
+            launcher.main(["resume", str(folder)])
+        command = run.call_args.args[0]
+        for flag in ("--gpus=rtx3090:1", "--partition=scrp", "--cpus-per-task=8",
+                     "--mem=96G", "--time=12:00:00",
+                     "--array=" + ",".join(map(str, range(30))) + "%4"):
+            self.assertIn(flag, command)
+        self.assertFalse(any(flag.startswith("--constraint=") for flag in command))
+        self.assertNotIn("--gpus=a100:1", command)
+        script = Path(command[-2]).read_bytes()
+        for header in (b"#SBATCH --constraint", b"#SBATCH --gpus", b"#SBATCH --partition"):
+            self.assertNotIn(header, script)
+        self.assertNotIn(b"\r", script)
+        record = launcher.read_launch(folder)
+        self.assertEqual(record["resources"]["gpu_type"], "rtx3090")
+        self.assertEqual(record["resources"]["parallel"], 4)
+        self.assertEqual(record["resources"]["gpus"], 1)
+        self.assertEqual(record["submissions"][-1]["job_id"], "123")
+        self.assertEqual(research, (folder / "research.yaml").read_bytes())
+
+    def test_other_gpu_types_and_aihub_typed_requests(self):
+        for backend, gpu_type, flag in (("--scrp", "rtx3060", "--gpus=rtx3060:1"),
+                                        ("--scrp", "any", "--gpus=1"),
+                                        ("--aihub", "rtx3090", "--gres=gpu:rtx3090:1")):
+            with self.subTest(backend=backend, gpu_type=gpu_type):
+                folder = launcher.main(["nn3", backend, "--sample", "p05", "--years", "1987",
+                                       "--gpu-type", gpu_type, "--root", str(self.root / "results"), "--dry-run"])
+                command = launcher.read_launch(folder)["submissions"][-1]["sbatch_command"]
+                self.assertIn(flag, command)
+                self.assertFalse(any(flag.startswith("--constraint=") for flag in command))
+                if backend == "--scrp":
+                    self.assertIn("--partition=scrp", command)
+                else:
+                    self.assertFalse(any(flag.startswith("--partition=") for flag in command))
+
+    def test_legacy_gpu_defaults_and_type_changes_select_the_correct_partition(self):
+        folder = self.prepare("nn1", "--scrp", "1987", "p05")
+        record = launcher.read_launch(folder)
+        record["resources"].pop("gpu_type")  # Records prepared before GPU selection existed.
+        atomic_write(folder / "launch.json", json.dumps(record))
+        launcher.main(["resume", str(folder), "--dry-run"])
+        command = launcher.read_launch(folder)["submissions"][-1]["sbatch_command"]
+        self.assertIn("--gpus=a100:1", command)
+        self.assertIn("--constraint=a100", command)
+        for gpu_type, override, partition in (("rtx3090", [], "scrp"),
+                                               ("rtx3060", ["--partition", "large"], "large"),
+                                               ("a100", [], "a100")):
+            with self.subTest(gpu_type=gpu_type):
+                launcher.main(["resume", str(folder), "--gpu-type", gpu_type, *override, "--dry-run"])
+                launcher.main(["resume", str(folder), "--dry-run"])
+                command = launcher.read_launch(folder)["submissions"][-1]["sbatch_command"]
+                self.assertIn(f"--partition={partition}", command)
+                self.assertIn(f"--gpus={gpu_type}:1", command)
+                self.assertEqual("--constraint=a100" in command, gpu_type == "a100")
+
+    def test_gpu_type_and_count_errors_do_not_prepare_experiments(self):
+        for model, backend, extra in (("pcr", "--scrp", ["--gpu-type", "rtx3090"]),
+                                       ("nn1", "--local", ["--gpu-type", "rtx3090"]),
+                                       ("nn1", "--scrp", ["--gpus", "4"])):
+            with self.subTest(model=model, backend=backend), self.assertRaises(ValueError):
+                launcher.main([model, backend, "--sample", "p05", "--years", "1987",
+                               "--root", str(self.root / "invalid"), "--dry-run", *extra])
+        self.assertFalse((self.root / "invalid").exists())
 
     def test_uncertain_submission_cannot_be_blindly_retried(self):
         folder = self.prepare()

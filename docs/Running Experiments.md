@@ -26,9 +26,11 @@ uv sync --extra nn
   --parallel 1 --cpus 4 --mem 8G --time 00:30:00
 ```
 
-NN SCRP jobs select `run_nn_a100_scrp.sh` automatically and request one `a100`
-GPU in the `a100` partition. The script also sets `--constraint=a100` because
-SCRP's accounting GPU label can include Hopper hardware. The first pilot's
+NN SCRP jobs select `run_nn_scrp.sh` automatically. `--gpu-type` accepts
+`a100` (the SCRP default), `rtx3090`, `rtx3060`, or `any`. A100 jobs use the
+`a100` partition plus `--constraint=a100`, because SCRP's accounting GPU label
+can include Hopper hardware. The other choices default to the `scrp` partition
+without an A100 constraint. `--partition` can override the default. The first pilot's
 4 CPUs/8G/30 minutes override the full-run initial defaults. `nn3` runs the
 matching deeper-network pilot. Add `--dry-run` to inspect the submission without
 sending it to Slurm; use `resume EXPERIMENT_ID` to submit that prepared experiment.
@@ -38,6 +40,29 @@ forward/backward check before fitting. Driver details are in `nvidia_smi.txt`
 beside `run.log` under `annual/logs/`. Startup fails if CUDA is unavailable or
 more/less than one GPU is visible; it does not fall back to CPU. Live SCRP quota,
 resource availability and compute-node compatibility remain to be verified there.
+
+Full-universe NN1, all 30 test years, up to four RTX 3090 jobs at a time:
+
+```bash
+.venv/bin/python -B run_experiment.py nn1 --scrp \
+  --sample full --years 1987:2016 --gpu-type rtx3090 --gpus 1 \
+  --parallel 4 --cpus 8 --mem 96G --time 12:00:00
+```
+
+`--gpus 1` is per annual task; `--parallel 4` allows four simultaneous tasks,
+so at most four GPUs, 32 CPUs and 384G RAM in total. Each task has its own
+12-hour limit. The trainer uses one GPU; requesting four GPUs in one task is
+rejected. Live quotas and available resources determine actual concurrency.
+The 96G request is an initial full-sample allocation, not a measured requirement.
+
+Resume preserves GPU type, partition and concurrency. Changing `--gpu-type` on
+resume selects the new type's default partition unless `--partition` is also
+provided; completed years stay saved. Older SCRP NN records without a GPU type
+retain their A100 default. The old `run_nn_a100_scrp.sh` remains available for
+legacy use. Upload the updated launcher and new `run_nn_scrp.sh` before running
+these commands on SCRP; no model source or environment update is required.
+AI Hub keeps its default untyped GPU request; an explicit GPU type is passed
+through as `--gres=gpu:TYPE:1` and must match that cluster's configured labels.
 
 PCR/PLS now save coefficients, intercept, feature order and fitted transforms;
 RF saves its selected trees. ENet/OLS-3 and GLM already retain their fitted state.

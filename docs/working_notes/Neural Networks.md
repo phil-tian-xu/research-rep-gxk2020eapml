@@ -184,14 +184,18 @@ After a successful local pilot and a matching small cluster check, full runs use
 ```
 
 Choose one backend on that cluster. The launcher requests one GPU per annual
-task (SCRP `--gpus=a100:1`, AI Hub `--gres=gpu:1`); default NN concurrency is one,
+task (SCRP defaults to `--gpus=a100:1`, AI Hub to `--gres=gpu:1`); default NN concurrency is one,
 initial RAM request 64G and wall time 12 hours. These are initial allocations,
 not measured full-sample requirements or promises of current account availability.
 Confirm live account/partition/GPU limits before submitting. Existing CPU model
 commands never request GPUs. Seeds/candidates run serially on each task's GPU.
 
-SCRP NN submissions select `run_nn_a100_scrp.sh`, with partition `a100` and
-the documented `a100` node constraint. Startup logs the actual GPU and driver
+SCRP NN submissions select `run_nn_scrp.sh`. `--gpu-type a100` (default) uses
+partition `a100` and the documented `a100` node constraint. `--gpu-type rtx3090`,
+`rtx3060`, or `any` defaults to partition `scrp` and removes the A100 constraint.
+The launcher puts these settings in the submission command; the generic script
+has no hidden GPU type or partition. The old A100 script remains for legacy use.
+Startup logs the actual GPU and driver
 and verifies a CUDA matrix forward/backward pass before the annual worker.
 For the first 1987 fixed-5% cluster check, use the smaller resource request:
 
@@ -205,6 +209,27 @@ The launcher snapshots this batch script and submits it; no manual `sbatch`
 command is needed. This pilot command requests one GPU through the NN defaults.
 Its CPU/RAM/time overrides do not change model settings or the sample. The local
 preparation and mocked submission checks do not establish cluster runtime success.
+
+For the full universe and 1987-2016 with four concurrent RTX 3090 tasks:
+
+```bash
+.venv/bin/python -B run_experiment.py nn1 --scrp \
+  --sample full --years 1987:2016 --gpu-type rtx3090 --gpus 1 \
+  --parallel 4 --cpus 8 --mem 96G --time 12:00:00
+```
+
+GPU count is one per annual task. `--parallel 4` allows four independent annual
+tasks, requesting up to four GPUs, 32 CPUs and 384G CPU RAM in total, subject to
+live account/partition limits and availability. The time limit is per year.
+This changes scheduling only: sample selection, loss, precision, batches, seeds,
+tuning, ensemble size and early stopping remain identical. Full-sample RAM and
+runtime for these settings have not yet been measured.
+
+GPU type and concurrency are saved in `launch.json` and retained on resume.
+When explicitly changing GPU type on resume, its default partition replaces the
+previous partition unless `--partition` is supplied too. Legacy SCRP NN records
+without the new GPU-type field retain the A100 default. AI Hub keeps its untyped
+GPU default; explicit types use `--gres=gpu:TYPE:1` with site-specific labels.
 
 Use the usual `list`, `resume`, and `collect` commands. Each annual run contains
 the authoritative checkpoint, an additional `NN1_training.csv` covering all

@@ -75,7 +75,7 @@ def year_range(value):
 def execution_options(args, previous=None):
     aihub = getattr(args, "aihub", False)
     options = dict(previous or {})
-    for key in ("parallel", "cpus", "mem", "time", "account", "partition", "qos", "gpus"):
+    for key in ("parallel", "cpus", "mem", "time", "account", "partition", "qos", "gpus", "gpu_type"):
         value = getattr(args, key, None)
         if value is not None:
             options[key] = value
@@ -84,15 +84,24 @@ def execution_options(args, previous=None):
     options.setdefault("parallel", 1 if is_nn else 4 if args.scrp else 1)
     options.setdefault("cpus", 8)
     options.setdefault("gpus", 1 if is_nn and (args.scrp or aihub) else 0)
+    options.setdefault("gpu_type", "a100" if is_nn and args.scrp else "any" if is_nn and aihub else None)
     options.setdefault("mem", "64G" if is_nn else {"pcr": "128G", "ols3": "8G"}.get(model, "192G"))
     options.setdefault("time", {"pcr": "02:00:00", "ols3": "01:00:00"}.get(model, "12:00:00"))
     options.setdefault("account", None if aihub else "pg")
-    options.setdefault("partition", None if aihub else "a100" if is_nn and args.scrp else "scrp")
+    # A different GPU type on resume must not retain the previous type's partition.
+    if (previous and getattr(args, "gpu_type", None) is not None and
+            options["gpu_type"] != previous.get("gpu_type", "a100" if args.scrp else "any") and
+            getattr(args, "partition", None) is None):
+        options.pop("partition", None)
+    options.setdefault("partition", None if aihub else
+                       "a100" if is_nn and args.scrp and options["gpu_type"] == "a100" else "scrp")
     options.setdefault("qos", None if aihub else "c32g4")
     if options["cpus"] < 1 or options["parallel"] < 1:
         raise ValueError("CPUs and parallel tasks must be positive.")
     if options["gpus"] not in (0, 1):
-        raise ValueError("Annual jobs support zero GPUs or one GPU per task.")
+        raise ValueError("Annual jobs support zero GPUs or one GPU per task; use --parallel for concurrent GPU jobs.")
+    if options["gpu_type"] is not None and not options["gpus"]:
+        raise ValueError("--gpu-type requires a cluster NN job with one GPU per task.")
     if not re.fullmatch(r"[1-9]\d*[MG]", options["mem"]):
         raise ValueError("Memory must be a positive amount in M or G, e.g. 128G.")
     if not re.fullmatch(r"(?:\d+-)?\d+:\d{2}:\d{2}", options["time"]):
@@ -230,7 +239,7 @@ def execute(folder, args, argv):
         if slurm:
             scrp_nn = args.scrp and record["model"] in {f"NN{i}" for i in range(1, 6)}
             script_name = ("run_annual_aihub.sh" if args.aihub else
-                           "run_nn_a100_scrp.sh" if scrp_nn else "run_annual_scrp.sh")
+                           "run_nn_scrp.sh" if scrp_nn else "run_annual_scrp.sh")
             script = submission_dir / script_name
             # Snapshot the generic script without changing the legacy entry point.
             script.write_bytes((ROOT / script_name).read_bytes().replace(b"\r\n", b"\n"))
@@ -242,7 +251,11 @@ def execute(folder, args, argv):
                        f"--job-name=gkx-{record['model'].lower()}",
                        f"--output={submission_dir}/slurm-%A_%a.out"]
             if options["gpus"]:
-                command.append(f"--gres=gpu:{options['gpus']}" if args.aihub else f"--gpus=a100:{options['gpus']}")
+                gpu_request = (str(options["gpus"]) if options["gpu_type"] == "any" else
+                               f"{options['gpu_type']}:{options['gpus']}")
+                command.append(f"--gres=gpu:{gpu_request}" if args.aihub else f"--gpus={gpu_request}")
+                if scrp_nn and options["gpu_type"] == "a100":
+                    command.append("--constraint=a100")
             if args.after:
                 command.append(f"--dependency=afterany:{args.after}")
             command += [str(script), str(folder / "annual")]
@@ -437,9 +450,11 @@ def parser():
             cmd.add_argument("--years", type=year_range, required=True)
             cmd.add_argument("--config", help="Optional versioned research config; defaults listed in the run guide.")
         cmd.add_argument("--root", help="Results root; otherwise GKX_EXPERIMENT_ROOT or the site default.")
-        cmd.add_argument("--parallel", type=int, help="Concurrent annual jobs: SCRP defaults to 4; AI Hub/local to 1.")
+        cmd.add_argument("--parallel", type=int, help="Concurrent annual jobs / total GPUs for NN: NN defaults to 1; SCRP CPU models to 4.")
         cmd.add_argument("--cpus", type=int, help="CPUs/BLAS threads per annual task (default 8).")
         cmd.add_argument("--gpus", type=int, help="GPUs per annual task: NN cluster jobs use 1; CPU models use 0.")
+        cmd.add_argument("--gpu-type", choices=("a100", "rtx3090", "rtx3060", "any"),
+                         help="GPU model per NN task: SCRP defaults to a100, AI Hub to any. Use --parallel for the number of GPU jobs.")
         cmd.add_argument("--mem", help="RAM/task: PCR 128G, PLS/ENet 192G, OLS-3 8G; initial allocations.")
         cmd.add_argument("--time", help="Time/task: PCR 02:00:00, PLS/ENet 12:00:00, OLS-3 01:00:00.")
         for key in ("account", "partition", "qos"):

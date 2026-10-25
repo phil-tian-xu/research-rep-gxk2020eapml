@@ -64,6 +64,29 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+Selectable NN cluster GPUs (2026-10-25): `run_experiment.py` now accepts
+`--gpu-type a100/rtx3090/rtx3060/any`; `--gpus 1` remains the per-year allocation
+and `--parallel N` controls concurrent annual jobs / maximum total GPUs.
+SCRP NN jobs use the new generic `run_nn_scrp.sh`: default A100 requests retain
+partition/constraint `a100`, while RTX/any requests default to partition `scrp`
+with no A100 constraint. Existing A100 script is preserved for legacy use.
+GPU type and resources persist on resume; an explicit type change selects its
+default partition unless `--partition` is supplied. Old NN records without the
+new field retain their A100 default. AI Hub keeps its untyped GPU default;
+explicit types pass through as typed GRES labels. Model code/settings unchanged.
+Full SCRP NN1 command: `run_experiment.py nn1 --scrp --sample full --years
+1987:2016 --gpu-type rtx3090 --gpus 1 --parallel 4 --cpus 8 --mem 96G --time
+12:00:00`. Requests up to four GPUs, 32 CPUs and 384G CPU RAM, subject to live
+quotas/availability; the 12-hour limit is per annual task. All 27 launcher tests
+passed, including typed requests, unchanged research settings, legacy resumes,
+partition changes and CPU/AI Hub dispatch. A real local dry-run prepared all
+30 full-data annual configs and the expected four-job RTX 3090 submission.
+No cluster job submitted during this change; full-data RTX memory/runtime and
+GPU-node compatibility remain unmeasured. See `docs/Running Experiments.md`.
+Phil also reported the SCRP NN1 p05/1987 A100 pilot completed and collected:
+test R2=-3.463426%, versus local -2.367893%. The difference and remote training
+diagnostics still need review; successful execution is not predictive replication.
+
 SCRP NN A100 submission (2026-10-24): new `run_nn_a100_scrp.sh` is selected
 automatically for NN1-NN5 `--scrp` launches. Defaults to partition `a100`, one
 typed `a100` GPU and the documented `a100` node constraint. Logs GPU/driver and
