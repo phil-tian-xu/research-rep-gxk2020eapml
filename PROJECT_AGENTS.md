@@ -64,6 +64,26 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+OLS-3 size groups (2026-10-26): separate `python -B -m
+core.data_examine.ols3_size_groups --experiment PATH` scores saved forecasts for
+All/Top 1,000/Bottom 1,000; default never fits. Optional
+`--refit-train-validation` reuses the existing estimator/settings on all pretest
+years, recomputing the same Huber rule. Three predictors are cached once; annual
+masks exclude test/future data. Positive raw formation-month mvel1 determines
+monthly groups; 478 missing and 2,286 zero test sizes are audited and excluded
+only from size groups, retained in All. This size policy is author-unverified.
+Complete full-universe 1987-2016 report:
+`results/ols3_size_groups/20261026T153516820520Z/`. All/Top/Bottom R2 (%): saved
+training-only 0.212829/0.222102/0.226620; train+validation
+0.155809/0.239630/0.155460; paper 0.16/0.31/0.17. Expanded fitting matches rounded
+All but leaves a Top gap of 0.07037 pp; the authors' OLS-3 refit rule remains
+unverified. All 2,494,470 forecasts were checked; each size group has 360,000
+observations. All 30 diagnostic fits converged. Six new and 13 existing evaluation
+tests passed; 17 real years gave identical cached/repeated-loading coefficients.
+See `docs/working_notes/OLS3 Size Group Comparison.md`. New module is outside
+fit/resume source hashes; production model code, original experiments and Phil's
+progress tracker are unchanged.
+
 Combined experiments (2026-10-25): `run_experiment.py combine SOURCE1 SOURCE2
 --years FIRST:LAST` registers disjoint source plans before or after fitting.
 The returned combined ID supports status/resume/collect and Figures 4/5. Resume
