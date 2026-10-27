@@ -20,7 +20,11 @@ layout. Ambiguous/missing annual runs and duplicate models are rejected.
 
 Combined experiment directories created by `run_experiment.py combine` are also
 accepted. Pass the combined directory as one experiment; its frozen year ownership
-resolves each original annual fit. Keep all original source directories available.
+resolves each annual fit. After combined collection, verified source copies live
+inside the combined folder, so that folder alone supplies the saved fits even
+after downloading or relocation. Before first successful collection, the original
+source directories must remain available. The matching processed panel is always
+separate and required by Figure 4.
 Figure 5 consumes the resulting full-horizon Figure 4 report in the usual way.
 
 Each invocation creates `results/replication_comparison/<timestamp>/figure4/`:

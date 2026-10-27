@@ -16,7 +16,8 @@ import subprocess
 import sys
 
 from core.annual_jobs import collect, load_plan, prepare
-from core.combined_experiments import combination_plan, load_combination, collect_combination
+from core.combined_experiments import (combination_plan, load_combination, collect_combination,
+                                       load_source_bundle, source_directory)
 from core.data_query.datasets import DATASET_PATHS
 from core.run_state import atomic_write, load_run_config, read_checkpoints, run_lock, runtime_identity
 from utils.general_utils import load_config
@@ -256,18 +257,20 @@ def resume_combination(folder, args, argv):
         plan = load_combination(folder)
         if args.aihub and read_launch(folder)["backend"] != "aihub":
             raise ValueError("--aihub cannot resume an experiment from another backend.")
-        validate_combined_resources([read_launch(Path(s["experiment"])) for s in plan["sources"]])
-        current_runtime = runtime_identity()
-        orchestrator = hashlib.sha256((ROOT / "core" / "annual_jobs.py").read_bytes()).hexdigest()
+        validate_combined_resources([read_launch(source_directory(folder, s)) for s in plan["sources"]])
+        bundled = load_source_bundle(folder) is not None
         pending = []
         # Preflight every source before any submission; one uncertain receipt stops the run.
         for source in plan["sources"]:
-            parent = Path(source["experiment"])
+            parent = source_directory(folder, source)
             source_plan, record = source["plan"], read_launch(parent)
             completed = saved_years(parent, verify=True)
             if completed == source_plan["years"]:
                 continue
-            if source_plan["runtime"] != current_runtime or source_plan["orchestrator_sha256"] != orchestrator:
+            if bundled:
+                raise ValueError("Embedded source is incomplete; restore the combined snapshot. It cannot submit fitting jobs.")
+            if (source_plan["runtime"] != runtime_identity() or source_plan["orchestrator_sha256"] !=
+                    hashlib.sha256((ROOT / "core" / "annual_jobs.py").read_bytes()).hexdigest()):
                 raise ValueError("Execution code/environment changed; use the original checkout/environment to resume.")
             if record["backend"] == "local":
                 if any(s["state"] in {"running", "submitting", "unknown"} for s in record["submissions"]):
@@ -278,7 +281,7 @@ def resume_combination(folder, args, argv):
             pending.append(parent)
         for parent in pending:
             execute(parent, argparse.Namespace(**vars(args)), argv)
-    if not args.dry_run and all(saved_years(Path(s["experiment"])) == s["plan"]["years"] for s in plan["sources"]):
+    if not args.dry_run and all(saved_years(source_directory(folder, s)) == s["plan"]["years"] for s in plan["sources"]):
         collect_combination(folder)
     else:
         print(f"Track this combined ID with status; collect when complete: {folder.name}")
@@ -432,7 +435,7 @@ def list_experiments(root, refresh=False, experiment=None):
             record = read_launch(path.parent)
             if record.get("kind") == "combined":
                 plan = load_combination(path.parent)
-                parents = [Path(s["experiment"]) for s in plan["sources"]]
+                parents = [source_directory(path.parent, s) for s in plan["sources"]]
                 submissions = [s for parent in parents for s in read_launch(parent)["submissions"]]
                 saved = sum(len(saved_years(parent)) for parent in parents)
                 action = "combined"

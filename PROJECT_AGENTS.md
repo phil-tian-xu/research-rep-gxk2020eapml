@@ -64,6 +64,29 @@ the full 1957-2016 wide panel has not yet been built in this verification.
 To be added.
 
 ## Development experiments
+
+Self-contained combined results (2026-10-27): collecting a combined ID now
+copies complete source experiment folders into its own `sources/` directory,
+with a SHA-256 file inventory published only after copy/source verification.
+The original experiment contents, modification times and directory entries are
+unchanged; existing worker locks are opened read-only and no source lock files
+are created. Nothing is moved, deleted, archived or hidden. Existing ready
+combined reports are upgraded by their next `collect` without changing scores,
+frozen plans or original provenance. `year_sources.csv` uses paths relative to
+the combined folder and retains `original_*` locations. A combined launch-record
+storage marker detects a missing bundle instead of silently reverting to the
+originals. Repeated collection verifies the stored snapshot; it does not sync
+later source edits. Status, completed resume, collection and Figures 4/5 support
+relocated/downloaded folders, including Linux paths read on Windows. Incomplete
+runs still execute through their original sources; snapshots never submit fits.
+Download the entire collected combined folder; the processed panel/environment
+remain separate. See `docs/Running Experiments.md` and the cluster run guides.
+No fitting/orchestrator sources, model settings, production results or remote
+jobs changed. All 240 tests passed (66.034s), including 15 combined tests for
+preservation, real tiny NN pooling, legacy upgrades, portable Figures 4/5,
+failed/corrupt-copy retries, whole-bundle loss, checksum guards, busy sources and
+recursive-copy destination rejection.
+
 Combined experiments (2026-10-25): `run_experiment.py combine SOURCE1 SOURCE2
 --years FIRST:LAST` registers disjoint source plans before or after fitting.
 The returned combined ID supports status/resume/collect and Figures 4/5. Resume

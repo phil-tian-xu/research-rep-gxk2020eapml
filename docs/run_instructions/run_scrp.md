@@ -135,6 +135,19 @@ head -n 15 "$exp/annual/combined/nn_training_summary.csv"
 cat "$exp/annual/combined/validation_summary.json"
 ```
 
+For a **combined** ID, collection also copies the complete source experiment
+folders into `$exp/sources/`, verifies their file hashes and preserves the originals
+unchanged. This also upgrades older combined runs whose reports are already ready.
+After collection succeeds, download **the entire combined folder only**, including
+`sources/`. It contains the saved models, predictions, training curves, configs
+and logs as well as pooled reports. Raw/processed datasets are separate.
+
+Paths in `annual/combined/year_sources.csv` are relative to `$exp`;
+`original_*` columns retain the original server paths. Status, collection and
+completed resume work with the downloaded combined folder's full path. Figure 4
+also needs the matching local panel. A repeated collect verifies the stored copies;
+it does not refresh them from the originals.
+
 | ID | Use |
 | --- | --- |
 | Experiment or combined ID | `resume`, `status`, `collect` |
@@ -185,8 +198,9 @@ Once a combined ID exists, reuse `collect "$run"`.
 
 ## 6. Read logs
 
-For logs, `exp` must point to the **source experiment**, including when you
-normally manage a combined ID.
+While jobs run, set `exp` to the **source experiment**. After combined collection,
+you can instead point it to the copied source directory under `COMBINED_ID/sources/`
+to read the saved logs.
 
 ```bash
 exp="/FULL/PATH/TO/SOURCE_EXPERIMENT"

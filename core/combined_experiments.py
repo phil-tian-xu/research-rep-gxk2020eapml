@@ -1,11 +1,13 @@
 """One logical experiment over disjoint annual jobs; never fit or load features."""
 
 from collections import ChainMap, Counter
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from copy import deepcopy
 import hashlib
 import json
-from pathlib import Path
+import os
+from pathlib import Path, PurePosixPath, PureWindowsPath
+import shutil
 from tempfile import TemporaryDirectory
 
 import numpy as np
@@ -56,11 +58,132 @@ def load_combination(folder):
     saved = json.loads((Path(folder) / "collection.json").read_text(encoding="utf-8"))
     if saved.get("schema_version") != 1:
         raise ValueError("Unsupported combined experiment schema.")
-    actual = combination_plan([s["experiment"] for s in saved["sources"]],
+    actual = combination_plan([source_directory(folder, s) for s in saved["sources"]],
                               (saved["years"][0], saved["years"][-1]))
+    # Storage can move; the original locations and plans remain provenance.
+    for source, original in zip(actual["sources"], saved["sources"]):
+        source["experiment"] = original["experiment"]
     if actual != saved:
         raise ValueError("A source experiment plan changed after combination.")
     return saved
+
+
+def original_directory(source):
+    """Keep a cluster's original path spelling even when reporting on Windows."""
+    value = source["experiment"]
+    return PureWindowsPath(value) if PureWindowsPath(value).drive else PurePosixPath(value)
+
+
+def load_source_bundle(folder):
+    """Read portable storage metadata without scanning large checkpoints for status."""
+    folder = Path(folder)
+    storage = json.loads((folder / "launch.json").read_text(encoding="utf-8")).get("source_storage")
+    if storage not in (None, "sources/manifest.json"):
+        raise ValueError("Unsupported embedded source storage location.")
+    if (folder / "sources").is_symlink():
+        raise ValueError("Embedded sources must be real copies, not symlinks.")
+    if not (folder / "sources").exists():
+        if storage:
+            raise ValueError("Embedded source bundle is missing; restore the complete combined folder.")
+        return None
+    bundle = json.loads((folder / "sources/manifest.json").read_text(encoding="utf-8"))
+    plan = json.loads((folder / "collection.json").read_text(encoding="utf-8"))
+    expected = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
+    if bundle.get("schema_version") != 1 or bundle.get("collection_sha256") != expected:
+        raise ValueError("Embedded source manifest differs from the combined plan.")
+    entries = bundle["sources"]
+    if ([s["experiment"] for s in entries] != [s["experiment"] for s in plan["sources"]]
+            or any(s["directory"] != f"{i:02d}-{original_directory(s).name}"
+                   for i, s in enumerate(entries))):
+        raise ValueError("Embedded source directories disagree with the combined plan.")
+    if any((folder / "sources" / s["directory"]).is_symlink() for s in entries):
+        raise ValueError("Embedded sources must be real copies, not symlinks.")
+    return bundle
+
+
+def source_directory(folder, source):
+    bundle = load_source_bundle(folder)
+    if bundle is None:
+        return Path(source["experiment"])
+    entry, = (s for s in bundle["sources"] if s["experiment"] == source["experiment"])
+    return Path(folder) / "sources" / entry["directory"]
+
+
+@contextmanager
+def source_lock(folder):
+    """Use existing worker locks read-only; never create/change source files."""
+    try:
+        stream = (Path(folder) / ".run.lock").open("rb")
+    except FileNotFoundError:
+        yield
+        return
+    with stream:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise RuntimeError(f"Run directory is in use: {folder}") from error
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def source_file_hashes(folder):
+    """Bounded-memory integrity inventory; lock files are transient, not results."""
+    hashes = {}
+    for path in sorted(Path(folder).rglob("*")):
+        if path.is_symlink():
+            raise ValueError(f"Source snapshots do not support symlinks: {path}")
+        if path.name == ".run.lock" or path.is_dir():
+            continue
+        if not path.is_file():
+            raise ValueError(f"Source snapshots require regular files: {path}")
+        with path.open("rb") as stream:
+            hashes[path.relative_to(folder).as_posix()] = hashlib.file_digest(stream, "sha256").hexdigest()
+    return hashes
+
+
+def preserve_sources(folder, plan):
+    """Copy all source results and atomically publish only a verified full bundle."""
+    bundle = load_source_bundle(folder)
+    if bundle is not None:
+        for source in bundle["sources"]:
+            parent = folder / "sources" / source["directory"]
+            if not parent.is_dir() or parent.is_symlink() or source_file_hashes(parent) != source["files"]:
+                raise ValueError(f"Embedded source checksum/file inventory mismatch: {parent.name}.")
+    else:
+        with TemporaryDirectory(prefix=".sources-", dir=folder) as temporary:
+            staging = Path(temporary) / "sources"
+            staging.mkdir()
+            entries = []
+            for i, source in enumerate(plan["sources"]):
+                parent = Path(source["experiment"])
+                if folder.is_relative_to(parent):
+                    raise ValueError("Combined folder must be outside every original source folder.")
+                directory = f"{i:02d}-{original_directory(source).name}"
+                before = source_file_hashes(parent)
+                shutil.copytree(parent, staging / directory, ignore=shutil.ignore_patterns(".run.lock"))
+                if (source_file_hashes(staging / directory) != before
+                        or source_file_hashes(parent) != before):
+                    raise ValueError(f"Source changed while copying, or copy checksum mismatch: {parent.name}.")
+                entries.append(dict(experiment=source["experiment"], directory=directory, files=before))
+            atomic_write(staging / "manifest.json", json.dumps(dict(schema_version=1,
+                collection_sha256=hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest(),
+                sources=entries), indent=2))
+            staging.rename(folder / "sources")
+    launch_path = folder / "launch.json"
+    launch = json.loads(launch_path.read_text(encoding="utf-8"))
+    if launch.get("source_storage") != "sources/manifest.json":
+        launch["source_storage"] = "sources/manifest.json"
+        atomic_write(launch_path, json.dumps(launch, indent=2))
 
 
 def resolve_annual_run(experiment, year):
@@ -71,7 +194,7 @@ def resolve_annual_run(experiment, year):
         owners = [s for s in plan["sources"] if year in s["plan"]["years"]]
         if len(owners) != 1:
             raise ValueError(f"Year {year} is outside the combined run.")
-        folder = Path(owners[0]["experiment"])
+        folder = source_directory(folder, owners[0])
     if (folder / "annual").is_dir():
         folder /= "annual"
     runs = sorted((folder / "years" / str(year)).glob("*/manifest.json"))
@@ -162,6 +285,9 @@ def collect_combination(experiment):
     with ExitStack() as locks:
         locks.enter_context(run_lock(folder))
         plan = load_combination(folder)
+        bundled = load_source_bundle(folder) is not None
+        if bundled:
+            preserve_sources(folder, plan)  # Verify every copied result before using it.
         cfg = CfgNode(plan["sources"][0]["plan"]["config"])
         cfg.RUN.SPLIT.FIRST_TEST_YEAR, cfg.RUN.SPLIT.LAST_TEST_YEAR = plan["years"][0], plan["years"][-1]
         output = folder / "annual" / "combined"
@@ -169,22 +295,23 @@ def collect_combination(experiment):
         records, sources, annual, training = ChainMap(), [], [], []
         dataset, features, nn_runtime = None, None, None
         for source in sorted(plan["sources"], key=lambda s: s["experiment"]):
-            parent = Path(source["experiment"])
-            locks.enter_context(run_lock(parent))
-            locks.enter_context(run_lock(parent / "annual"))
+            parent = source_directory(folder, source)
+            locks.enter_context(source_lock(parent))
+            locks.enter_context(source_lock(parent / "annual"))
         # Recheck after taking the source locks.
         load_combination(folder)
         for year in plan["years"]:
             source, = (s for s in plan["sources"] if year in s["plan"]["years"])
-            parent, source_plan = Path(source["experiment"]), source["plan"]
+            parent, source_plan = source_directory(folder, source), source["plan"]
+            original = original_directory(source)
             year_dir = parent / "annual" / "years" / str(year)
             if not year_dir.is_dir():
                 raise ValueError(f"Missing/incomplete annual task: {year} ({parent.name}).")
-            locks.enter_context(run_lock(year_dir))
+            locks.enter_context(source_lock(year_dir))
             run = resolve_annual_run(parent, year)
-            locks.enter_context(run_lock(run))
+            locks.enter_context(source_lock(run))
             source_cfg = load_run_config(run)
-            if source_cfg.dump() != annual_config(source_plan, parent / "annual", year).dump():
+            if source_cfg.dump() != annual_config(source_plan, original / "annual", year).dump():
                 raise ValueError(f"Annual configuration differs from its source plan: {year}.")
             manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
             if manifest["runtime"] != source_plan["runtime"]:
@@ -211,23 +338,25 @@ def collect_combination(experiment):
             attempt = attempts[-1] if attempts else {}
             resources = attempt.get("resources", launch["resources"])
             checkpoint = index.paths[year, model]
-            provenance = dict(test_year=year, specification=model, source_experiment=parent.name,
-                experiment_directory=str(parent), run_directory=str(run), checkpoint=str(checkpoint),
+            provenance = dict(test_year=year, specification=model, source_experiment=original.name,
+                experiment_directory=str(original),
+                run_directory=str(original.joinpath(*run.relative_to(parent).parts)),
+                checkpoint=str(original.joinpath(*checkpoint.relative_to(parent).parts)),
                 checkpoint_sha256=hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
                 requested_gpu_type=resources.get("gpu_type"), resources=resources,
                 slurm_job_id=attempt.get("job_id"),
                 device=tuning.get("device"), device_name=tuning.get("device_name"),
-                training_csv=str(checkpoint.with_name(f"{model}_training.csv")) if model.startswith("NN") else None,
-                training_plot=str(checkpoint.with_name(f"{model}_training.png")) if model.startswith("NN") else None)
+                training_csv=str(original.joinpath(*checkpoint.with_name(f"{model}_training.csv").relative_to(parent).parts)) if model.startswith("NN") else None,
+                training_plot=str(original.joinpath(*checkpoint.with_name(f"{model}_training.png").relative_to(parent).parts)) if model.startswith("NN") else None)
             sources.append(provenance)
-            row = dict(record["metrics"], source_experiment=parent.name,
+            row = dict(record["metrics"], source_experiment=original.name,
                        device_name=tuning.get("device_name"), best_params=json.dumps(tuning["best_params"], sort_keys=True))
             if model.startswith("NN"):
                 identity = {key: tuning[key] for key in ("torch_version", "cuda_version", "objective", "return_units", "hidden_sizes")}
                 if nn_runtime is not None and identity != nn_runtime:
                     raise ValueError("NN runtime/method identities differ across source fits.")
                 nn_runtime = identity
-                training.extend(nn_training_rows(record, selected, parent.name))
+                training.extend(nn_training_rows(record, selected, original.name))
                 row.update(test_prediction_std=tuning["test_prediction_std"],
                            validation_zero_mse=tuning["validation_baselines"]["zero"])
             annual.append(row)
@@ -240,7 +369,31 @@ def collect_combination(experiment):
             saved = json.loads((output / "source_identity.json").read_text(encoding="utf-8"))
             if saved != identity:
                 raise ValueError("Published combined report has different source identities.")
-            print(f"Verified combined reports: {output}")
+        if not bundled:
+            print("Copying completed source experiments into the combined folder; originals stay unchanged.", flush=True)
+            preserve_sources(folder, plan)
+        # CSV locations are portable; frozen source_identity.json retains original provenance.
+        portable_sources = deepcopy(sources)
+        for row in portable_sources:
+            source, = (s for s in plan["sources"] if row["test_year"] in s["plan"]["years"])
+            original = original_directory(source)
+            parent = source_directory(folder, source)
+            for key in ("experiment_directory", "run_directory", "checkpoint", "training_csv", "training_plot"):
+                if row[key] is not None:
+                    row["original_" + key] = row[key]
+                    relative = type(original)(row[key]).relative_to(original)
+                    row[key] = parent.joinpath(*relative.parts).relative_to(folder).as_posix()
+        portable_csv = pd.DataFrame(portable_sources).to_csv(index=False)
+        path_note = ("Paths in year_sources.csv are relative to the combined experiment folder.\n"
+                     "All source results are copied under sources/; original_* columns and source_identity.json retain provenance.\n"
+                     "sources/manifest.json verifies file hashes. Raw/processed datasets are not bundled.\n")
+        if output.exists():
+            if (output / "year_sources.csv").read_bytes() != portable_csv.encode("utf-8"):
+                atomic_write(output / "year_sources.csv", portable_csv)
+            notes = (output / "comparison_notes.txt").read_text(encoding="utf-8")
+            if path_note not in notes:
+                atomic_write(output / "comparison_notes.txt", notes + path_note)
+            print(f"Verified self-contained combined experiment: {folder}\nCombined reports: {output}")
             return output
         output.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".collect-", dir=output.parent) as temporary:
@@ -250,7 +403,7 @@ def collect_combination(experiment):
             annual_frame["r2_percent"] = annual_frame.r2_zero * 100
             for name, frame in (("table1_all", table), ("complexity", complexity),
                                 ("tuning_curves", curves), ("annual_metrics", annual_frame),
-                                ("year_sources", pd.DataFrame(sources))):
+                                ("year_sources", pd.DataFrame(portable_sources))):
                 atomic_write(staging / f"{name}.csv", frame.to_csv(index=False))
             if training:
                 atomic_write(staging / "nn_training_summary.csv", pd.DataFrame(training).to_csv(index=False))
@@ -264,12 +417,12 @@ def collect_combination(experiment):
                 "Pooled R2 = 1 - sum annual squared forecast errors / sum annual observed returns squared.\n"
                 "GPU models may differ; saved research settings, fitting sources and environments must agree.\n"
                 "NN summary contains retained members of the validation-selected ensemble, not all grid candidates.\n"
-                "Original checkpoints contain all candidate epoch histories; year_sources.csv links original curves.\n"
+                "Copied checkpoints contain all candidate epoch histories; year_sources.csv links copied curves.\n"
                 "Negative R2 or training warnings do not themselves indicate corrupt results or justify selecting another fit.\n"
-                "Integrity checks do not establish predictive success or exact paper replication.\n")
+                "Integrity checks do not establish predictive success or exact paper replication.\n" + path_note)
             plot_complexity(complexity, cfg, staging)
             plot_validation_curves(curves, staging)
             staging.rename(output)
         print(table.to_string(index=False))
-        print(f"Combined reports: {output}")
+        print(f"Self-contained combined experiment: {folder}\nCombined reports: {output}")
         return output

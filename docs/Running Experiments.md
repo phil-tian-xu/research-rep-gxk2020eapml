@@ -131,7 +131,8 @@ finite dated predictions, consistent counts, recomputed MSE/R2 and validation
 selection. Overlapping sources are rejected; it never chooses a fit by test R2.
 It pools squared forecast errors and observed returns squared across all years;
 it does not average annual or source R2 values. A repeated combined collect
-revalidates the sources and returns the existing report.
+revalidates saved fits and the copied file inventory, then returns the existing
+report.
 
 Reports live in `EXPERIMENT_ROOT/COMBINED_ID/annual/combined/`:
 
@@ -140,21 +141,47 @@ Reports live in `EXPERIMENT_ROOT/COMBINED_ID/annual/combined/`:
 - `nn_training_summary.csv`: one row per retained member of each year's selected
   NN ensemble: initial/retained/final losses, best epoch, stopping reason,
   parameter change, nonzero weights and prediction dispersion.
-- `year_sources.csv`: original run/checkpoint paths, checkpoint hashes, GPU
-  identity, recorded submission resources and links to original training CSV/PNG.
+- `year_sources.csv`: run/checkpoint and training CSV/PNG paths relative to the
+  **combined experiment directory**, checkpoint hashes, GPU identity and recorded
+  resources. `original_*` columns preserve the original absolute locations.
 - `source_identity.json`, `validation_summary.json`: frozen source plans,
   data/features, provenance and integrity-check outcome.
 
 Negative R2 and training warning flags remain visible; they are not reasons to
-discard a year. The full candidate histories and weights remain in their original
-checkpoints. Keep both source directories: the combined run references them and
-does not copy the fits. Within the same results root, `remove SOURCE_ID` refuses
-a source referenced by a live combined run. If using different roots, preserve
-those referenced sources yourself. Removing the combined ID archives its descriptor/reports and leaves
-the original sources intact. Existing single-experiment collect remains supported.
+discard a year. Collection now makes the combined experiment **self-contained**:
+complete source experiment folders are copied under `COMBINED_ID/sources/`,
+including checkpoints, all candidate histories, selected weights, training plots,
+configs, worker attempts and logs. Only transient `.run.lock` files are omitted.
+The originals are read without creating lock files or changing their contents; nothing is
+moved, removed, archived or hidden from listing. Their own report status remains
+independent of the combined report.
+
+`sources/manifest.json` records every copied file's SHA-256 and binds the copies
+to the frozen combination plan. Collection stages the copies, checks source and
+copy inventories/hashes, and publishes the whole `sources/` directory only after
+verification. Failed copies can be retried with the same ID. Existing combined
+runs, including already-ready reports, gain the copies on their next
+`collect COMBINED_ID`; published scores and `source_identity.json` stay unchanged.
+Allow disk space for the extra copies. Symlinks inside source folders are refused.
+
+After successful collection, **download just the entire combined experiment
+folder**. Its relative storage paths support `status`, completed `resume`,
+`collect`, and Figures 4/5 after relocation, including SCRP/AI Hub to Windows.
+Use the downloaded folder's full path, or `--root` for ID lookup. Original absolute
+paths inside saved configs/manifests remain historical provenance. Before first
+successful collection, the original sources are still required for execution and
+reporting. A damaged embedded copy is an error; the collector never silently falls
+back to the originals or resubmits training from copies. Verified snapshots are
+not automatically synchronized with later edits to the originals. Logs reflect
+their state at collection time.
+
+Raw/processed datasets and the project environment are not bundled; Figure 4
+still requires the matching local panel and reporting dependencies. Existing
+single-experiment collection and the archive safeguards remain unchanged.
 
 For Figure 4, pass the combined experiment **directory** to the existing tool;
-it resolves the original saved fit for each year. Figure 5 then uses Figure 4's
+it resolves the copied saved fit for each year after collection (the original
+fit before consolidation). Figure 5 then uses Figure 4's
 annual scores as usual:
 
 ```bash

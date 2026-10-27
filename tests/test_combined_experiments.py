@@ -1,6 +1,7 @@
 """Split execution, integrity failures, pooled scores and downstream reports."""
 
 import importlib.util
+import hashlib
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -11,12 +12,14 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import yaml
 from pandas.testing import assert_frame_equal
 
 import test_annual_jobs as fixtures
 import run_experiment as launcher
 from core.annual_jobs import collect, prepare, run_task
-from core.combined_experiments import collect_combination, load_combination, resolve_annual_run
+from core.combined_experiments import (collect_combination, load_combination, resolve_annual_run,
+                                       source_directory, source_file_hashes)
 from core.figure4_report import make_report
 
 
@@ -234,7 +237,208 @@ class CombinedExperimentTests(unittest.TestCase):
             predicted.extend(payload["predictions"]["prediction"])
         y, forecast = np.array(observed), np.array(predicted)
         self.assertAlmostEqual(pd.read_csv(output / "table1_all.csv").r2_zero.iloc[0], 1 - np.sum((y-forecast)**2)/(y@y))
-        self.assertTrue(all(Path(p).is_file() for p in pd.read_csv(output / "year_sources.csv").training_csv))
+        self.assertTrue(all((group / p).is_file() for p in pd.read_csv(output / "year_sources.csv").training_csv))
+
+
+    def snapshot(self, folder):
+        return {p.relative_to(folder).as_posix(): (p.read_bytes(), p.stat().st_mtime_ns)
+                for p in folder.rglob("*") if p.is_file()}
+
+    def test_all_results_copied_and_originals_unchanged_on_first_and_repeated_collect(self):
+        left, right, group = self.completed_pair()
+        for parent in (left, right):
+            (parent / "research.yaml").write_text(self.cfg.dump())
+            log = parent / "annual/logs/worker/run.log"
+            log.parent.mkdir(parents=True)
+            log.write_text("training finished\n")
+            script = parent / "submissions/attempt/run.sh"
+            script.parent.mkdir(parents=True)
+            script.write_text("saved script\n")
+        before = [self.snapshot(p) for p in (left, right)]
+        output = collect_combination(group)
+        published = self.snapshot(group)
+        plan = load_combination(group)
+        manifest = json.loads((group / "sources/manifest.json").read_text())
+        for original, source, entry in zip((left, right), plan["sources"], manifest["sources"]):
+            stored = source_directory(group, source)
+            self.assertEqual(source_file_hashes(original), source_file_hashes(stored))
+            self.assertEqual(entry["files"], source_file_hashes(stored))
+            self.assertFalse(list(stored.rglob(".run.lock")))
+            self.assertTrue((stored / "annual/logs/worker/run.log").is_file())
+        table = pd.read_csv(output / "year_sources.csv")
+        for row in table.itertuples():
+            self.assertTrue((group / row.checkpoint).is_file())
+            self.assertFalse(Path(row.checkpoint).is_absolute())
+            self.assertTrue(Path(row.original_checkpoint).is_file())
+        with patch("core.combined_experiments.shutil.copytree", side_effect=AssertionError("recopy")):
+            self.assertEqual(collect_combination(group), output)
+        self.assertEqual(published, self.snapshot(group))
+        self.assertEqual(before, [self.snapshot(p) for p in (left, right)])
+
+    def test_downloaded_folder_status_resume_collection_and_figures_need_no_originals(self):
+        left, right, group = self.completed_pair()
+        output = collect_combination(group)
+        expected = self.snapshot(group)
+        downloaded = self.root / "download" / group.name
+        shutil.copytree(group, downloaded)
+        # Only synthetic fixture sources are made unavailable; never real results.
+        left.rename(self.root / "offline-left")
+        right.rename(self.root / "offline-right")
+        with patch("run_experiment.execute", side_effect=AssertionError("refit")), \
+                patch("run_experiment.runtime_identity", side_effect=AssertionError("fit environment")):
+            status, = launcher.main(["status", str(downloaded)])
+            self.assertEqual((status["saved"], status["reports"]), ("2/2", "ready"))
+            launcher.main(["resume", str(downloaded)])
+            result = launcher.main(["collect", str(downloaded)])
+        self.assertEqual(expected, self.snapshot(downloaded))
+        assert_frame_equal(pd.read_csv(result / "table1_all.csv"), pd.read_csv(output / "table1_all.csv"))
+        with patch("core.models.dimension_reduction.PCRRegressor.fit", side_effect=AssertionError("refit")):
+            figure4 = make_report([downloaded], self.root / "panel", self.root / "reports", [2003, 2004], batch_size=7)
+        self.assertEqual(pd.read_csv(figure4 / "verification.csv").year.tolist(), [2003, 2004])
+        from core.figure5_report import make_report as figure5
+        figure5([figure4], self.root / "figure5")
+
+    def test_existing_published_combination_upgrades_without_changing_scores_or_provenance(self):
+        left, right, group = self.completed_pair()
+        output = collect_combination(group)
+        identity = (output / "source_identity.json").read_bytes()
+        plan = (group / "collection.json").read_bytes()
+        reports = {p.name: p.read_bytes() for p in output.iterdir()
+                   if p.name not in {"year_sources.csv", "comparison_notes.txt"}}
+        # Reconstruct the previous linked layout, with an already-published report.
+        shutil.rmtree(group / "sources")
+        launch = launcher.read_launch(group)
+        launch.pop("source_storage")
+        (group / "launch.json").write_text(json.dumps(launch))
+        legacy = json.loads(identity)["sources"]
+        (output / "year_sources.csv").write_text(pd.DataFrame(legacy).to_csv(index=False))
+        before = [self.snapshot(p) for p in (left, right)]
+        with patch("core.models.dimension_reduction.PCRRegressor.fit", side_effect=AssertionError("refit")):
+            launcher.main(["collect", str(group)])
+        self.assertTrue((group / "sources/manifest.json").is_file())
+        self.assertEqual(identity, (output / "source_identity.json").read_bytes())
+        self.assertEqual(plan, (group / "collection.json").read_bytes())
+        for name, content in reports.items():
+            self.assertEqual(content, (output / name).read_bytes())
+        self.assertEqual(before, [self.snapshot(p) for p in (left, right)])
+
+    def test_failed_or_corrupt_copy_publishes_nothing_and_can_retry(self):
+        left, right, group = self.completed_pair()
+        before = [self.snapshot(p) for p in (left, right)]
+        copytree = shutil.copytree
+
+        def copying(src, dst, *args, **kwargs):
+            result = copytree(src, dst, *args, **kwargs)
+            if (Path(dst) / "launch.json").is_file():
+                (Path(dst) / "launch.json").write_text("corrupt copy")
+            return result
+
+        for error in (OSError("out of space"), None):
+            if error is not None:
+                patcher = patch("core.combined_experiments.shutil.copytree", side_effect=error)
+            else:
+                patcher = patch("core.combined_experiments.shutil.copytree", side_effect=copying)
+            with patcher, self.assertRaisesRegex((OSError, ValueError), "out of space|checksum mismatch"):
+                collect_combination(group)
+            self.assertFalse((group / "sources").exists())
+            self.assertFalse((group / "annual/combined").exists())
+            self.assertFalse(list(group.glob(".sources-*")))
+            self.assertEqual(before, [self.snapshot(p) for p in (left, right)])
+        collect_combination(group)
+
+    def test_damaged_embedded_results_never_fall_back_or_submit_training(self):
+        left, right, group = self.completed_pair()
+        output = collect_combination(group)
+        row = pd.read_csv(output / "year_sources.csv").iloc[0]
+        checkpoint = group / row.checkpoint
+        content = checkpoint.read_bytes()
+        before = [self.snapshot(p) for p in (left, right)]
+        checkpoint.write_bytes(content + b"\n")  # Valid JSON, but not the verified copy.
+        with self.assertRaisesRegex(ValueError, "checksum/file inventory"):
+            collect_combination(group)
+        checkpoint.unlink()
+        with patch("run_experiment.execute", side_effect=AssertionError("submission")):
+            with self.assertRaisesRegex(ValueError, "Embedded source is incomplete"):
+                launcher.main(["resume", str(group)])
+        checkpoint.write_bytes(content)
+        unexpected = checkpoint.parent / "unexpected.csv"
+        unexpected.write_text("unexpected")
+        with self.assertRaisesRegex(ValueError, "checksum/file inventory"):
+            collect_combination(group)
+        unexpected.unlink()
+        collect_combination(group)
+        self.assertEqual(before, [self.snapshot(p) for p in (left, right)])
+
+    def test_missing_entire_bundle_does_not_revert_to_originals(self):
+        left, right, group = self.completed_pair()
+        collect_combination(group)
+        before = [self.snapshot(p) for p in (left, right)]
+        (group / "sources").rename(group / "unavailable-sources")
+        with patch("run_experiment.execute", side_effect=AssertionError("submission")):
+            with self.assertRaisesRegex(ValueError, "source bundle is missing"):
+                launcher.main(["resume", str(group)])
+            with self.assertRaisesRegex(ValueError, "source bundle is missing"):
+                collect_combination(group)
+        self.assertEqual(before, [self.snapshot(p) for p in (left, right)])
+
+    def test_combined_folder_inside_source_is_rejected_before_recursive_copy(self):
+        left, right, group = self.completed_pair()
+        nested = left / "nested-combined"
+        shutil.copytree(group, nested)
+        with self.assertRaisesRegex(ValueError, "outside every original source"):
+            collect_combination(nested)
+        self.assertFalse((nested / "sources").exists())
+        self.assertFalse(list(nested.glob(".sources-*")))
+
+    def test_busy_source_is_rejected_without_changing_originals(self):
+        left, right, group = self.completed_pair()
+        run = resolve_annual_run(left, 2003)
+        from core.run_state import run_lock
+        before = [self.snapshot(p) for p in (left, right)]
+        with run_lock(run):
+            with self.assertRaisesRegex(RuntimeError, "in use"):
+                collect_combination(group)
+        self.assertFalse((group / "sources").exists())
+        self.assertEqual(before, [self.snapshot(p) for p in (left, right)])
+
+    def test_posix_cluster_provenance_is_portable_on_windows(self):
+        left, right, group = self.completed_pair()
+        output = collect_combination(group)
+        expected = pd.read_csv(output / "table1_all.csv")
+        mapping = {str(p): "/data/users/test/experiments/" + p.name for p in (left, right)}
+
+        def foreign_paths(value):
+            if isinstance(value, dict):
+                return {k: foreign_paths(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [foreign_paths(v) for v in value]
+            if isinstance(value, str):
+                for original, foreign in mapping.items():
+                    if value.startswith(original):
+                        return foreign + value[len(original):].replace("\\", "/")
+            return value
+
+        bundle = json.loads((group / "sources/manifest.json").read_text())
+        for entry in bundle["sources"]:
+            parent = group / "sources" / entry["directory"]
+            for path in parent.rglob("*"):
+                if path.suffix == ".yaml":
+                    path.write_text(yaml.safe_dump(foreign_paths(yaml.safe_load(path.read_text()))))
+                elif path.name in {"experiment.json", "manifest.json", "launch.json"}:
+                    path.write_text(json.dumps(foreign_paths(json.loads(path.read_text()))))
+            entry["experiment"] = foreign_paths(entry["experiment"])
+            entry["files"] = source_file_hashes(parent)
+        plan = foreign_paths(json.loads((group / "collection.json").read_text()))
+        (group / "collection.json").write_text(json.dumps(plan))
+        bundle["collection_sha256"] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
+        (group / "sources/manifest.json").write_text(json.dumps(bundle))
+        identity = foreign_paths(json.loads((output / "source_identity.json").read_text()))
+        (output / "source_identity.json").write_text(json.dumps(identity))
+        launcher.main(["collect", str(group)])
+        status, = launcher.main(["status", str(group)])
+        self.assertEqual(status["saved"], "2/2")
+        assert_frame_equal(expected, pd.read_csv(output / "table1_all.csv"))
+        self.assertTrue(all((group / p).is_file() for p in pd.read_csv(output / "year_sources.csv").checkpoint))
 
 
 if __name__ == "__main__":

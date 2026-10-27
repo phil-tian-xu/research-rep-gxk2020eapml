@@ -260,9 +260,14 @@ are diagnostic flags, not automatic exclusion rules. Negative out-of-sample R2
 is reported unchanged. Review forecast dispersion and zero/training-mean baseline
 comparisons alongside learning curves before interpreting economic performance.
 
-`year_sources.csv` links the original per-year `NN1_training.csv` (all grid
-candidates and members) and `NN1_training.png` (selected ensemble curves). The
-checkpoint remains authoritative and contains all histories and retained weights.
+`year_sources.csv` links the copied per-year `NN1_training.csv` (all grid
+candidates and members) and `NN1_training.png` (selected ensemble curves), using
+paths relative to the combined experiment directory. `original_*` columns retain
+the original paths. Collection copies complete source results under `sources/`
+with verified file hashes and leaves every original experiment unchanged. Existing
+combined runs gain these copies on their next collect; download that one complete
+combined folder for analysis. The copied checkpoint is byte-identical to the
+original and contains all candidate histories and selected ensemble weights.
 Collection validates and pools forecasts without retraining or loading features.
 Histories are still saved at annual completion; this change does not provide
 live epoch streaming or within-epoch restart.
