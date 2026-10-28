@@ -163,6 +163,29 @@ completed resume work with the downloaded combined folder's full path. Figure 4
 also needs the matching local panel. A repeated collect verifies the stored copies;
 it does not refresh them from the originals.
 
+To restore missing/corrupt copies from the original sub-runs, or shorten an older
+combined bundle's paths, run on AI Hub:
+
+```bash
+.venv/bin/python -B run_experiment.py collect "$run" --aihub --repair-sources
+.venv/bin/python -B run_experiment.py status "$run" --aihub --verify
+```
+
+The same combined ID and scores are retained. Repair uses only files matching the
+recorded SHA-256 values and never changes the originals or submits training.
+New/repaired bundles use `sources/00/`, `sources/01/`, etc. Allow temporary disk
+space for a second bundle during repair. A missing inventory manifest must be
+restored from backup; it is never recreated from guessed contents.
+
+`sources=present` means the file inventory matches; `sources=verified` additionally
+means all hashes were checked. `reports=incomplete` / `sources=incomplete` indicate
+a damaged bundle even when an old report exists. Use `list --aihub --verify` to
+check all combined bundles. These checks do not query Slurm.
+
+For Windows, transfer the archive intact between PCs, extract to a short directory
+such as `D:\data_transfer`, then run `status /FULL/PATH/TO/COMBINED --verify` with
+the local project's Python. Verify the extracted files before analysis.
+
 | ID | Use |
 | --- | --- |
 | Experiment or combined ID | `resume`, `status`, `collect`, with `--aihub` |

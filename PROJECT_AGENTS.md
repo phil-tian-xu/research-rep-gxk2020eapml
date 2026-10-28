@@ -65,6 +65,26 @@ To be added.
 
 ## Development experiments
 
+Combined bundle recovery (2026-10-29): `run_experiment.py collect COMBINED_ID
+--repair-sources` restores missing/corrupt embedded files from intact originals
+only when their bytes match the frozen SHA-256 inventory. Intact copied files
+are retained; later original edits/new files are not synchronized. Original
+sub-experiments, collection plans, IDs, provenance and scores remain unchanged.
+Replacement is staged/verified, with rollback and preservation of previous copies
+if rollback itself fails. Unexpected embedded files are refused rather than lost.
+New/repaired bundles use schema 2 and short `sources/00`, `sources/01` paths;
+schema 1 remains readable. Intact old bundles compact without original access.
+`status`/`list` check inventories and show `sources=present`; `--verify` hashes
+all embedded files and shows `sources=verified`, failing nonzero on corruption.
+Incomplete bundles show `reports=incomplete` even when old summaries exist.
+Missing inventory manifests require a complete backup. Shared datasets/environment
+remain external. No fitting/orchestrator code or production results changed.
+All 247 tests passed (77.835s), including frozen-byte repair, preserved originals,
+schema-1 migration, unavailable/changed originals, rollback failures and relocation
+with paths over 260 characters. Real local NN3-NN5 imports were checked read-only
+and remain incomplete; no server repair/submission was performed. See the primary
+run guide and SCRP/AI Hub command sheets for recovery and transfer verification.
+
 Self-contained combined results (2026-10-27): collecting a combined ID now
 copies complete source experiment folders into its own `sources/` directory,
 with a SHA-256 file inventory published only after copy/source verification.

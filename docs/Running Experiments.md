@@ -164,6 +164,34 @@ runs, including already-ready reports, gain the copies on their next
 `collect COMBINED_ID`; published scores and `source_identity.json` stay unchanged.
 Allow disk space for the extra copies. Symlinks inside source folders are refused.
 
+New bundles use short directories `sources/00/`, `sources/01/`, etc.; the manifest
+maps them to the original experiment IDs. Existing schema-1 bundles remain readable.
+To repair missing/corrupt embedded files or compact an older bundle, run on SCRP
+while the original sub-experiments remain available:
+
+```bash
+.venv/bin/python -B run_experiment.py collect "$run" --repair-sources
+.venv/bin/python -B run_experiment.py status "$run" --verify
+```
+
+Repair retains intact copied files and restores other files only if their original
+bytes match the frozen SHA-256 inventory. It stages and verifies the full replacement
+before publishing it, rolls back a failed publication, and preserves the original
+experiments, combined ID, frozen plans, provenance and scores. Repair never fits or
+submits models. It does not import later source edits or new files; unexpected files
+inside the embedded copies cause an error rather than being deleted. An intact old
+bundle can be compacted without access to its originals. Missing bundle manifests
+require restoring a complete backup; repair does not invent a replacement inventory.
+The replacement temporarily requires disk space for a second embedded bundle.
+
+`status` and `list` now show `sources=present` after checking the file inventory;
+`--verify` also reads every file and requires its SHA-256 to match, showing
+`sources=verified`. A damaged/missing bundle shows `sources=incomplete` and
+`reports=incomplete`, even if an old summary report remains. This is independent
+of Slurm status; verification failures exit nonzero. `--refresh` still queries
+Slurm only. Linked, unbundled reports
+show `reports=linked` until collected into a self-contained bundle.
+
 After successful collection, **download just the entire combined experiment
 folder**. Its relative storage paths support `status`, completed `resume`,
 `collect`, and Figures 4/5 after relocation, including SCRP/AI Hub to Windows.
@@ -174,6 +202,13 @@ reporting. A damaged embedded copy is an error; the collector never silently fal
 back to the originals or resubmits training from copies. Verified snapshots are
 not automatically synchronized with later edits to the originals. Logs reflect
 their state at collection time.
+
+For Windows transfers, keep the archive intact while copying between machines,
+extract into a short path such as `D:\data_transfer`, and run `status` with the
+downloaded folder's full path and `--verify` before analysis. Short source names
+reduce nesting but do not remove Windows path limits for arbitrarily long destination
+paths or older extraction tools. A successful archive checksum does not by itself
+verify extraction; verify the extracted bundle too.
 
 Raw/processed datasets and the project environment are not bundled; Figure 4
 still requires the matching local panel and reporting dependencies. Existing

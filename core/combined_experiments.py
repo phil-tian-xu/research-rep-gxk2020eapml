@@ -89,13 +89,23 @@ def load_source_bundle(folder):
     bundle = json.loads((folder / "sources/manifest.json").read_text(encoding="utf-8"))
     plan = json.loads((folder / "collection.json").read_text(encoding="utf-8"))
     expected = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
-    if bundle.get("schema_version") != 1 or bundle.get("collection_sha256") != expected:
+    version = bundle.get("schema_version")
+    if version not in (1, 2) or bundle.get("collection_sha256") != expected:
         raise ValueError("Embedded source manifest differs from the combined plan.")
     entries = bundle["sources"]
     if ([s["experiment"] for s in entries] != [s["experiment"] for s in plan["sources"]]
-            or any(s["directory"] != f"{i:02d}-{original_directory(s).name}"
+            or any(s["directory"] != (f"{i:02d}-{original_directory(s).name}" if version == 1 else f"{i:02d}")
                    for i, s in enumerate(entries))):
         raise ValueError("Embedded source directories disagree with the combined plan.")
+    for source in entries:
+        if not source["files"]:
+            raise ValueError("Embedded source inventory is empty.")
+        for name, digest in source["files"].items():
+            relative = PurePosixPath(name)
+            if (not relative.parts or relative.is_absolute() or ".." in relative.parts or relative.as_posix() != name
+                    or "\\" in name or ":" in name or relative.name == ".run.lock"
+                    or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)):
+                raise ValueError("Invalid embedded source file path or SHA-256.")
     if any((folder / "sources" / s["directory"]).is_symlink() for s in entries):
         raise ValueError("Embedded sources must be real copies, not symlinks.")
     return bundle
@@ -136,8 +146,8 @@ def source_lock(folder):
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
-def source_file_hashes(folder):
-    """Bounded-memory integrity inventory; lock files are transient, not results."""
+def source_file_hashes(folder, *, contents=True):
+    """Inventory regular files; optionally hash contents with bounded memory."""
     hashes = {}
     for path in sorted(Path(folder).rglob("*")):
         if path.is_symlink():
@@ -146,19 +156,101 @@ def source_file_hashes(folder):
             continue
         if not path.is_file():
             raise ValueError(f"Source snapshots require regular files: {path}")
-        with path.open("rb") as stream:
-            hashes[path.relative_to(folder).as_posix()] = hashlib.file_digest(stream, "sha256").hexdigest()
+        digest = None
+        if contents:
+            with path.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        hashes[path.relative_to(folder).as_posix()] = digest
     return hashes
+
+
+def verify_source_bundle(folder, *, checksums=True):
+    """Read-only verification, including snapshots moved away from their originals."""
+    bundle = load_source_bundle(folder)
+    if bundle is not None:
+        for source in bundle["sources"]:
+            parent = Path(folder) / "sources" / source["directory"]
+            actual = source_file_hashes(parent, contents=checksums)
+            if (not parent.is_dir() or parent.is_symlink() or actual.keys() != source["files"].keys()
+                    or (checksums and actual != source["files"])):
+                raise ValueError(f"Embedded source checksum/file inventory mismatch: {parent.name}. "
+                                 "On the original server, collect this combined ID with --repair-sources.")
+    return bundle
+
+
+def repair_source_bundle(folder):
+    """Restore frozen bytes from intact copies/originals and use short source paths."""
+    folder = Path(folder).resolve()
+    bundle = load_source_bundle(folder)
+    if bundle is None:
+        return  # An uncollected/legacy linked run is preserved by normal collection.
+    inventories = []
+    for source in bundle["sources"]:
+        parent = folder / "sources" / source["directory"]
+        actual = source_file_hashes(parent)
+        if actual.keys() - source["files"].keys():
+            raise ValueError(f"Cannot repair {parent.name}: unexpected embedded files would be lost. Existing copies were preserved.")
+        inventories.append(actual)
+    if bundle["schema_version"] == 2 and all(actual == s["files"] for actual, s in zip(inventories, bundle["sources"])):
+        return
+    previous = folder / ".sources-previous"
+    if previous.exists() or previous.is_symlink():
+        raise ValueError(f"A previous source bundle needs inspection before repair: {previous}.")
+    with ExitStack() as locks, TemporaryDirectory(prefix=".sources-repair-", dir=folder) as temporary:
+        staging = Path(temporary) / "sources"
+        staging.mkdir()
+        entries = []
+        for i, (source, actual) in enumerate(zip(bundle["sources"], inventories)):
+            parent = folder / "sources" / source["directory"]
+            original = Path(source["experiment"])
+            needed = [name for name, digest in source["files"].items() if actual.get(name) != digest]
+            if needed:
+                if not original.is_dir() or original.is_symlink() or folder.is_relative_to(original.resolve()):
+                    raise ValueError(f"Cannot repair {parent.name}: intact original source is unavailable: {original}.")
+                directories = {original}
+                for name in source["files"]:
+                    directories.update(original / p for p in PurePosixPath(name).parents)
+                for directory in sorted(directories):
+                    locks.enter_context(source_lock(directory))
+                original_hashes = source_file_hashes(original)
+                for name in needed:
+                    if original_hashes.get(name) != source["files"][name]:
+                        raise ValueError(f"Cannot repair {parent.name}/{name}: original file is missing or "
+                                         "differs from the recorded SHA-256. Existing combined copies were preserved.")
+            directory = f"{i:02d}"
+            destination = staging / directory
+            destination.mkdir()
+            for name, digest in source["files"].items():
+                src = (parent if actual.get(name) == digest else original) / name
+                target = destination / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, target)
+            if source_file_hashes(destination) != source["files"]:
+                raise ValueError(f"Repair copy checksum mismatch: {parent.name}. Existing combined copies were preserved.")
+            entries.append(dict(source, directory=directory))
+        repaired = dict(bundle, schema_version=2, sources=entries)
+        atomic_write(staging / "manifest.json", json.dumps(repaired, indent=2))
+        # The previous embedded copies remain available until the replacement succeeds.
+        (folder / "sources").rename(previous)
+        try:
+            staging.rename(folder / "sources")
+        except BaseException:
+            try:
+                previous.rename(folder / "sources")
+            except OSError as error:
+                raise RuntimeError(f"Could not roll back source publication; previous copies remain at {previous}.") from error
+            raise
+        if previous.is_symlink() or previous.resolve().parent != folder:
+            raise ValueError("Previous embedded bundle is outside the combined directory; cleanup refused.")
+        shutil.rmtree(previous)
+    print("Restored and verified the combined source bundle; originals stay unchanged.", flush=True)
 
 
 def preserve_sources(folder, plan):
     """Copy all source results and atomically publish only a verified full bundle."""
     bundle = load_source_bundle(folder)
     if bundle is not None:
-        for source in bundle["sources"]:
-            parent = folder / "sources" / source["directory"]
-            if not parent.is_dir() or parent.is_symlink() or source_file_hashes(parent) != source["files"]:
-                raise ValueError(f"Embedded source checksum/file inventory mismatch: {parent.name}.")
+        verify_source_bundle(folder)
     else:
         with TemporaryDirectory(prefix=".sources-", dir=folder) as temporary:
             staging = Path(temporary) / "sources"
@@ -168,14 +260,14 @@ def preserve_sources(folder, plan):
                 parent = Path(source["experiment"])
                 if folder.is_relative_to(parent):
                     raise ValueError("Combined folder must be outside every original source folder.")
-                directory = f"{i:02d}-{original_directory(source).name}"
+                directory = f"{i:02d}"
                 before = source_file_hashes(parent)
                 shutil.copytree(parent, staging / directory, ignore=shutil.ignore_patterns(".run.lock"))
                 if (source_file_hashes(staging / directory) != before
                         or source_file_hashes(parent) != before):
                     raise ValueError(f"Source changed while copying, or copy checksum mismatch: {parent.name}.")
                 entries.append(dict(experiment=source["experiment"], directory=directory, files=before))
-            atomic_write(staging / "manifest.json", json.dumps(dict(schema_version=1,
+            atomic_write(staging / "manifest.json", json.dumps(dict(schema_version=2,
                 collection_sha256=hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest(),
                 sources=entries), indent=2))
             staging.rename(folder / "sources")
@@ -278,12 +370,14 @@ def nn_training_rows(record, selected, source):
     return rows
 
 
-def collect_combination(experiment):
+def collect_combination(experiment, *, repair_sources=False):
     from core.replication_report import report_tables, plot_complexity, plot_validation_curves
 
     folder = Path(experiment).resolve()
     with ExitStack() as locks:
         locks.enter_context(run_lock(folder))
+        if repair_sources:
+            repair_source_bundle(folder)
         plan = load_combination(folder)
         bundled = load_source_bundle(folder) is not None
         if bundled:

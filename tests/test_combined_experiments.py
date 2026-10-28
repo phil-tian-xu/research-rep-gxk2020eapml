@@ -19,7 +19,7 @@ import test_annual_jobs as fixtures
 import run_experiment as launcher
 from core.annual_jobs import collect, prepare, run_task
 from core.combined_experiments import (collect_combination, load_combination, resolve_annual_run,
-                                       source_directory, source_file_hashes)
+                                       source_directory, source_file_hashes, verify_source_bundle)
 from core.figure4_report import make_report
 
 
@@ -259,6 +259,8 @@ class CombinedExperimentTests(unittest.TestCase):
         published = self.snapshot(group)
         plan = load_combination(group)
         manifest = json.loads((group / "sources/manifest.json").read_text())
+        self.assertEqual(manifest["schema_version"], 2)
+        self.assertEqual([s["directory"] for s in manifest["sources"]], ["00", "01"])
         for original, source, entry in zip((left, right), plan["sources"], manifest["sources"]):
             stored = source_directory(group, source)
             self.assertEqual(source_file_hashes(original), source_file_hashes(stored))
@@ -439,6 +441,163 @@ class CombinedExperimentTests(unittest.TestCase):
         self.assertEqual(status["saved"], "2/2")
         assert_frame_equal(expected, pd.read_csv(output / "table1_all.csv"))
         self.assertTrue(all((group / p).is_file() for p in pd.read_csv(output / "year_sources.csv").checkpoint))
+
+    def legacy_bundle(self, group):
+        """Reconstruct the real schema-1 directory layout used by existing SCRP runs."""
+        path = group / "sources/manifest.json"
+        bundle = json.loads(path.read_text())
+        for i, entry in enumerate(bundle["sources"]):
+            directory = f"{i:02d}-{Path(entry['experiment']).name}"
+            (group / "sources" / entry["directory"]).rename(group / "sources" / directory)
+            entry["directory"] = directory
+        bundle["schema_version"] = 1
+        path.write_text(json.dumps(bundle))
+        return bundle
+
+    def test_repair_restores_missing_and_corrupt_legacy_files_without_refitting_or_source_changes(self):
+        left, right, group = self.completed_pair()
+        output = collect_combination(group)
+        bundle = self.legacy_bundle(group)
+        identity = (output / "source_identity.json").read_bytes()
+        plan = (group / "collection.json").read_bytes()
+        expected = pd.read_csv(output / "table1_all.csv")
+        original_snapshots = [self.snapshot(p) for p in (left, right)]
+        stored = [group / "sources" / s["directory"] for s in bundle["sources"]]
+        checkpoint = resolve_annual_run(stored[0], 2003) / "years/2003/PCR.json"
+        checkpoint.write_bytes(checkpoint.read_bytes() + b"\n")
+        (resolve_annual_run(stored[1], 2004) / "predictions.csv").unlink()
+        # Repair must work even when the copied plan cannot be loaded initially.
+        (stored[0] / "annual/experiment.json").unlink()
+        status, = launcher.main(["status", str(group)])
+        self.assertEqual((status["reports"], status["sources"]), ("incomplete", "incomplete"))
+        with patch("run_experiment.execute", side_effect=AssertionError("refit")):
+            self.assertEqual(launcher.main(["collect", str(group), "--repair-sources"]), output)
+        repaired = verify_source_bundle(group)
+        self.assertEqual(repaired["schema_version"], 2)
+        self.assertEqual([s["directory"] for s in repaired["sources"]], ["00", "01"])
+        self.assertEqual([s["files"] for s in repaired["sources"]], [s["files"] for s in bundle["sources"]])
+        self.assertEqual(identity, (output / "source_identity.json").read_bytes())
+        self.assertEqual(plan, (group / "collection.json").read_bytes())
+        assert_frame_equal(expected, pd.read_csv(output / "table1_all.csv"))
+        self.assertEqual(original_snapshots, [self.snapshot(p) for p in (left, right)])
+        status, = launcher.main(["status", str(group), "--verify"])
+        self.assertEqual((status["saved"], status["reports"], status["sources"]), ("2/2", "ready", "verified"))
+        published = self.snapshot(group)
+        launcher.main(["collect", str(group), "--repair-sources"])
+        self.assertEqual(published, self.snapshot(group))
+
+    def test_valid_legacy_snapshot_compacts_without_originals_and_relocates_at_realistic_depth(self):
+        left, right, group = self.completed_pair()
+        output = collect_combination(group)
+        expected = pd.read_csv(output / "table1_all.csv")
+        self.legacy_bundle(group)
+        left.rename(self.root / "offline-left")
+        right.rename(self.root / "offline-right")
+        launcher.main(["collect", str(group), "--repair-sources"])
+        downloaded = self.root / ("downloaded-project-" + "x" * 70) / group.name
+        shutil.copytree(group, downloaded)
+        self.assertGreater(max(len(str(p)) for p in downloaded.rglob("*") if p.is_file()), 260)
+        with patch("run_experiment.execute", side_effect=AssertionError("refit")):
+            status, = launcher.main(["status", str(downloaded), "--verify"])
+            self.assertEqual((status["reports"], status["sources"]), ("ready", "verified"))
+            result = launcher.main(["collect", str(downloaded)])
+        assert_frame_equal(expected, pd.read_csv(result / "table1_all.csv"))
+        self.assertTrue(all((downloaded / p).is_file() for p in pd.read_csv(result / "year_sources.csv").checkpoint))
+
+    def test_repair_refuses_changed_original_without_overwriting_existing_snapshot(self):
+        left, right, group = self.completed_pair()
+        output = collect_combination(group)
+        copied = group / pd.read_csv(output / "year_sources.csv").checkpoint.iloc[0]
+        original = resolve_annual_run(left, 2003) / "years/2003/PCR.json"
+        copied.unlink()
+        original.write_bytes(original.read_bytes() + b"\n")
+        before = self.snapshot(group)
+        originals = [self.snapshot(p) for p in (left, right)]
+        with self.assertRaisesRegex(ValueError, "differs from the recorded SHA-256"):
+            launcher.main(["collect", str(group), "--repair-sources"])
+        self.assertEqual(before, self.snapshot(group))
+        self.assertEqual(originals, [self.snapshot(p) for p in (left, right)])
+        self.assertFalse(list(group.glob(".sources-repair-*")))
+
+    def test_repair_failure_rolls_back_and_extra_embedded_files_are_preserved(self):
+        left, right, group = self.completed_pair()
+        collect_combination(group)
+        bundle = self.legacy_bundle(group)
+        before = self.snapshot(group)
+        rename = Path.rename
+
+        def failing_publish(path, target):
+            if path.name == "sources" and path.parent.name.startswith(".sources-repair-"):
+                raise OSError("simulated publication failure")
+            return rename(path, target)
+
+        with patch.object(Path, "rename", failing_publish):
+            with self.assertRaisesRegex(OSError, "publication failure"):
+                launcher.main(["collect", str(group), "--repair-sources"])
+        self.assertEqual(before, self.snapshot(group))
+        extra = group / "sources" / bundle["sources"][0]["directory"] / "user_analysis.csv"
+        extra.write_text("keep this\n")
+        before = self.snapshot(group)
+        with self.assertRaisesRegex(ValueError, "unexpected embedded files"):
+            launcher.main(["collect", str(group), "--repair-sources"])
+        self.assertEqual(before, self.snapshot(group))
+
+    def test_status_distinguishes_present_verified_and_incomplete_bundles(self):
+        left, right, group = self.completed_pair()
+        output = collect_combination(group)
+        status, = launcher.main(["status", str(group)])
+        self.assertEqual((status["reports"], status["sources"]), ("ready", "present"))
+        checkpoint = group / pd.read_csv(output / "year_sources.csv").checkpoint.iloc[0]
+        checkpoint.write_bytes(checkpoint.read_bytes() + b"\n")
+        status, = launcher.list_experiments(group.parent, experiment=group, verify=True)
+        self.assertEqual((status["reports"], status["sources"]), ("incomplete", "incomplete"))
+        with self.assertRaisesRegex(ValueError, "verification failed"):
+            launcher.main(["status", str(group), "--verify"])
+        checkpoint.unlink()
+        status, = launcher.main(["status", str(group)])
+        self.assertEqual((status["saved"], status["reports"], status["sources"]), ("1/2", "incomplete", "incomplete"))
+        rows = launcher.list_experiments(self.root, verify=True)
+        status, = (row for row in rows if row["experiment"] == group.name)
+        self.assertEqual(status["reports"], "incomplete")
+        with self.assertRaisesRegex(ValueError, "verification failed"):
+            launcher.main(["list", "--root", str(self.root), "--verify"])
+
+    def test_repair_preserves_previous_copies_if_publication_and_rollback_both_fail(self):
+        left, right, group = self.completed_pair()
+        collect_combination(group)
+        self.legacy_bundle(group)
+        before = self.snapshot(group / "sources")
+        rename = Path.rename
+
+        def failing_renames(path, target):
+            if (path.name == ".sources-previous" or
+                    (path.name == "sources" and path.parent.name.startswith(".sources-repair-"))):
+                raise OSError("simulated rename failure")
+            return rename(path, target)
+
+        with patch.object(Path, "rename", failing_renames):
+            with self.assertRaisesRegex(RuntimeError, "previous copies remain"):
+                launcher.main(["collect", str(group), "--repair-sources"])
+        self.assertEqual(before, self.snapshot(group / ".sources-previous"))
+        self.assertFalse((group / "sources").exists())
+        self.assertFalse(list(group.glob(".sources-repair-*")))
+
+    def test_repair_refuses_missing_original_and_unsafe_inventory_paths(self):
+        left, right, group = self.completed_pair()
+        output = collect_combination(group)
+        checkpoint = group / pd.read_csv(output / "year_sources.csv").checkpoint.iloc[0]
+        checkpoint.unlink()
+        left.rename(self.root / "offline-left")
+        before = self.snapshot(group)
+        with self.assertRaisesRegex(ValueError, "original source is unavailable"):
+            launcher.main(["collect", str(group), "--repair-sources"])
+        self.assertEqual(before, self.snapshot(group))
+        manifest = group / "sources/manifest.json"
+        bundle = json.loads(manifest.read_text())
+        bundle["sources"][0]["files"]["../../outside.txt"] = "0" * 64
+        manifest.write_text(json.dumps(bundle))
+        with self.assertRaisesRegex(ValueError, "Invalid embedded source file path"):
+            launcher.main(["collect", str(group), "--repair-sources"])
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ import sys
 
 from core.annual_jobs import collect, load_plan, prepare
 from core.combined_experiments import (combination_plan, load_combination, collect_combination,
-                                       load_source_bundle, source_directory)
+                                       load_source_bundle, source_directory, verify_source_bundle)
 from core.data_query.datasets import DATASET_PATHS
 from core.run_state import atomic_write, load_run_config, read_checkpoints, run_lock, runtime_identity
 from utils.general_utils import load_config
@@ -427,18 +427,29 @@ def scheduler_states(job_ids):
         return {job: "unknown" for job in job_ids}
 
 
-def list_experiments(root, refresh=False, experiment=None):
+def list_experiments(root, refresh=False, experiment=None, *, verify=False):
     rows = []
     paths = [experiment / "launch.json"] if experiment else sorted(root.glob("*/launch.json"))
     for path in paths:
         try:
             record = read_launch(path.parent)
+            reports = "ready" if (path.parent / "annual/combined/source_identity.json").is_file() else "pending"
+            source_status = "n/a"
             if record.get("kind") == "combined":
-                plan = load_combination(path.parent)
-                parents = [source_directory(path.parent, s) for s in plan["sources"]]
-                submissions = [s for parent in parents for s in read_launch(parent)["submissions"]]
-                saved = sum(len(saved_years(parent)) for parent in parents)
+                submissions, saved = [], 0
                 action = "combined"
+                try:
+                    plan = load_combination(path.parent)
+                    parents = [source_directory(path.parent, s) for s in plan["sources"]]
+                    submissions = [s for parent in parents for s in read_launch(parent)["submissions"]]
+                    saved = sum(len(saved_years(parent)) for parent in parents)
+                    bundle = verify_source_bundle(path.parent, checksums=verify)
+                    source_status = ("verified" if verify else "present") if bundle else "linked"
+                    if not bundle and reports == "ready":
+                        reports = "linked"
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    source_status, reports = "incomplete", "incomplete"
+                    print(f"Combined source bundle is incomplete: {record['id']}: {error}", file=sys.stderr)
             else:
                 submissions = record["submissions"]
                 saved = len(saved_years(path.parent))
@@ -446,7 +457,7 @@ def list_experiments(root, refresh=False, experiment=None):
             rows.append({"experiment": record["id"], "model": record["model"], "sample": record["sample"],
                          "years": f"{record['years'][0]}:{record['years'][1]}",
                          "saved": f"{saved}/{record['years'][1]-record['years'][0]+1}",
-                         "reports": "ready" if (path.parent / "annual/combined/source_identity.json").is_file() else "pending",
+                         "reports": reports, "sources": source_status,
                          "last_action": action,
                          "job_ids": ",".join(s["job_id"] for s in submissions if s.get("job_id")),
                          "path": str(path.parent)})
@@ -565,11 +576,14 @@ def parser():
     listing.add_argument("--root")
     listing.add_argument("--aihub", action="store_true")
     listing.add_argument("--refresh", action="store_true", help="Also query Slurm; otherwise read saved records only.")
+    listing.add_argument("--verify", action="store_true", help="Also verify every embedded combined-source file's SHA-256.")
     report = commands.add_parser("collect")
     report.add_argument("experiment", nargs="+")
     report.add_argument("--years", type=year_range, help="Required when combining multiple source experiments.")
     report.add_argument("--root")
     report.add_argument("--aihub", action="store_true")
+    report.add_argument("--repair-sources", action="store_true",
+                        help="For a combined ID, restore frozen source files and shorten embedded paths; never refit.")
     combination = commands.add_parser("combine", help="Register disjoint source experiments as one logical run, before or after fitting.")
     combination.add_argument("experiment", nargs="+")
     combination.add_argument("--years", type=year_range, required=True)
@@ -580,6 +594,7 @@ def parser():
     status.add_argument("--root")
     status.add_argument("--aihub", action="store_true")
     status.add_argument("--refresh", action="store_true")
+    status.add_argument("--verify", action="store_true", help="Verify every embedded combined-source file's SHA-256.")
     removal = commands.add_parser("remove", help="Move one inactive experiment to the sibling archive directory.")
     removal.add_argument("experiment", help="Exact folder name or absolute path under the results root.")
     removal.add_argument("--root")
@@ -595,10 +610,16 @@ def main(argv=None):
     if args.command in BASELINES and not (args.scrp or args.aihub) and args.after:
         raise ValueError("--after applies only to Slurm submissions.")
     if args.command == "list":
-        return list_experiments(results_root(args.root, aihub=args.aihub), args.refresh)
+        rows = list_experiments(results_root(args.root, aihub=args.aihub), args.refresh, verify=args.verify)
+        if args.verify and any(row["sources"] == "incomplete" for row in rows):
+            raise ValueError("Combined source verification failed; inspect the incomplete rows above.")
+        return rows
     if args.command == "status":
         folder = resolve_experiment(args.experiment, args.root, aihub=args.aihub)
-        return list_experiments(folder.parent, args.refresh, folder)
+        rows = list_experiments(folder.parent, args.refresh, folder, verify=args.verify)
+        if args.verify and (not rows or rows[0]["sources"] == "incomplete"):
+            raise ValueError("Combined source verification failed; use collect --repair-sources on the original server.")
+        return rows
     if args.command == "combine":
         return combine_experiments(args.experiment, args)
     if args.command == "remove":
@@ -609,7 +630,9 @@ def main(argv=None):
         if (folder / "collection.json").is_file():
             if args.years and list(args.years) != read_launch(folder)["years"]:
                 raise ValueError("Requested years differ from the combined run's fixed horizon.")
-            return collect_combination(folder)
+            return collect_combination(folder, repair_sources=args.repair_sources)
+        if args.repair_sources:
+            raise ValueError("--repair-sources applies only to a combined experiment ID.")
         if args.years:
             raise ValueError("--years applies to combined collection; a single source uses its saved horizon.")
         if (folder / "annual/combined/source_identity.json").is_file():
