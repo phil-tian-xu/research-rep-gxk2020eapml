@@ -57,6 +57,45 @@ class ExperimentLauncherTests(unittest.TestCase):
             self.assertEqual(plan["config"]["DATA"]["DATASET"], "gkx_parquet")
             self.assertEqual(launcher.read_launch(folder)["model"], model)
 
+    def test_explicit_dataset_changes_only_data_selection_and_survives_resume(self):
+        baseline = self.prepare("nn3", "--local", "1987", "p05")
+        panel = self.root / "compact"
+        panel.mkdir()
+        chars = [f"c{i}" for i in range(94)]
+        macros = [f"macro_{m}" for m in ("dp", "ep", "bm", "ntis", "tbl", "tms", "dfy", "svar")]
+        industries = [f"sic2_{i:02d}" for i in range(74)]
+        (panel / "metadata.json").write_text(json.dumps(dict(dataset_name="gkx_compact_full",
+            format="parquet", status="complete", feature_columns=chars + macros + industries,
+            feature_specification=dict(kind="compact", characteristics=chars,
+                                       macro_columns=macros, industry_columns=industries))))
+        with patch.dict(launcher.DATASET_PATHS, {"gkx_compact_full": panel}):
+            folder = launcher.main(["nn3", "--local", "--dataset", "gkx_compact_full", "--years", "1987",
+                                   "--config", "gkx_nn3_v1", "--root", str(self.root / "results"), "--dry-run"])
+            original = (folder / "research.yaml").read_bytes()
+            launcher.main(["resume", str(folder), "--dry-run"])
+        _, plan = load_plan(folder / "annual")
+        _, reference = load_plan(baseline / "annual")
+        self.assertEqual(plan["config"]["RUN"]["MODELS"], reference["config"]["RUN"]["MODELS"])
+        self.assertEqual(plan["config"]["RUN"]["SPLIT"], reference["config"]["RUN"]["SPLIT"])
+        self.assertEqual(plan["config"]["DATA"]["DATASET"], "gkx_compact_full")
+        self.assertEqual(launcher.read_launch(folder)["dataset"], "gkx_compact_full")
+        self.assertEqual((folder / "research.yaml").read_bytes(), original)
+
+    def test_dataset_and_sample_are_mutually_exclusive_and_invalid_manifest_fails_early(self):
+        with redirect_stdout(StringIO()), patch("sys.stderr", StringIO()):
+            with self.assertRaises(SystemExit):
+                launcher.parser().parse_args(["nn1", "--local", "--sample", "full", "--dataset", "gkx_parquet", "--years", "1987"])
+        with self.assertRaisesRegex(ValueError, "complete Parquet"):
+            launcher.main(["nn1", "--local", "--dataset", "gkx_parquet", "--years", "1987",
+                           "--root", str(self.root / "invalid"), "--dry-run"])
+        self.assertFalse((self.root / "invalid").exists())
+
+    def test_squared_ols_commands_keep_existing_ols3_huber_mapping(self):
+        for command, model in (("ols", "OLS"), ("ols3-mse", "OLS3"), ("ols3", "OLS3_HUBER")):
+            folder = self.prepare(command, "--local", "1987", "p05")
+            _, plan = load_plan(folder / "annual")
+            self.assertEqual(plan["config"]["RUN"]["MODELS"]["ENABLED"], [model])
+
     def test_sbatch_arguments_job_receipt_and_dependency(self):
         folder = self.prepare()
         with patch("run_experiment.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "397999;cluster\n", "")) as run:

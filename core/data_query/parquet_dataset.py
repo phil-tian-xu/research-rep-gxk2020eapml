@@ -11,6 +11,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from core.data_query.datasets import validate_feature_dataset
+
 
 @dataclass
 class PanelBatch:
@@ -55,6 +57,7 @@ class ParquetPanel:
         if (m.get("schema_version") != 1 or m.get("format") != "parquet" or
                 m.get("status") != "complete" or m.get("return_units") != "decimal"):
             raise ValueError("A complete float64 Parquet conversion manifest is required.")
+        validate_feature_dataset(m)
         self.features = m["feature_columns"]
         roles = self.features + m["id_columns"] + [m[k] for k in
                 ("target_column", "return_month_column", "feature_month_column", "row_position_column")]

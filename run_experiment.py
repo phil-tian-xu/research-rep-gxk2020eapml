@@ -1,4 +1,4 @@
-"""Local/SCRP/AI Hub PCR, PLS, ENet+H and OLS-3+H. See docs/Running Experiments.md."""
+"""Run annual research experiments by model, dataset and config. See docs/Running Experiments.md."""
 
 import argparse
 from collections import Counter, defaultdict
@@ -18,7 +18,7 @@ import sys
 from core.annual_jobs import collect, load_plan, prepare
 from core.combined_experiments import (combination_plan, load_combination, collect_combination,
                                        load_source_bundle, source_directory, verify_source_bundle)
-from core.data_query.datasets import DATASET_PATHS
+from core.data_query.datasets import DATASET_PATHS, validate_feature_dataset
 from core.run_state import atomic_write, load_run_config, read_checkpoints, run_lock, runtime_identity
 from utils.general_utils import load_config
 
@@ -29,6 +29,8 @@ BASELINES = {"pcr": "gkx_pcr_full_v5", "pls": "gkx_pls_v2",
 MODEL_NAMES = {"pcr": "PCR", "pls": "PLS", "enet": "ENET_HUBER", "ols3": "OLS3_HUBER", "glm": "GLM_HUBER", "rf": "RF"}
 BASELINES.update({f"nn{i}": f"gkx_nn{i}_v1" for i in range(1, 6)})
 MODEL_NAMES.update({f"nn{i}": f"NN{i}" for i in range(1, 6)})
+BASELINES.update({"ols": "gkx_ols_v1", "ols3-mse": "gkx_ols3_mse_v1"})
+MODEL_NAMES.update({"ols": "OLS", "ols3-mse": "OLS3"})
 SAMPLES = {"full": "gkx_parquet", "p05": "gkx_dev_p05_seed2020_parquet"}
 
 
@@ -87,8 +89,8 @@ def execution_options(args, previous=None):
     options.setdefault("cpus", 8)
     options.setdefault("gpus", 1 if is_nn and (args.scrp or aihub) else 0)
     options.setdefault("gpu_type", "a100" if is_nn and args.scrp else "any" if is_nn and aihub else None)
-    options.setdefault("mem", "64G" if is_nn else {"pcr": "128G", "ols3": "8G"}.get(model, "192G"))
-    options.setdefault("time", {"pcr": "02:00:00", "ols3": "01:00:00"}.get(model, "12:00:00"))
+    options.setdefault("mem", "64G" if is_nn else {"pcr": "128G", "ols3": "8G", "ols3-mse": "8G"}.get(model, "192G"))
+    options.setdefault("time", {"pcr": "02:00:00", "ols3": "01:00:00", "ols3-mse": "01:00:00"}.get(model, "12:00:00"))
     options.setdefault("account", None if aihub else "pg")
     # A different GPU type on resume must not retain the previous type's partition.
     if (previous and getattr(args, "gpu_type", None) is not None and
@@ -142,20 +144,28 @@ def prepare_experiment(args, argv):
         raise ValueError("Cluster NN jobs require one GPU and NN.DEVICE=cuda.")
     if not is_nn and options["gpus"]:
         raise ValueError("Only NN jobs use GPUs; do not allocate unused GPUs to CPU models.")
-    cfg.DATA.DATASET = SAMPLES[args.sample]
+    dataset = args.dataset or SAMPLES[args.sample]
+    cfg.DATA.DATASET = dataset
     if not (DATASET_PATHS[cfg.DATA.DATASET] / "metadata.json").is_file():
         raise ValueError(f"Prepared dataset is missing: {DATASET_PATHS[cfg.DATA.DATASET]}")
+    if args.dataset:
+        metadata = json.loads((DATASET_PATHS[dataset] / "metadata.json").read_text(encoding="utf-8"))
+        if (metadata.get("dataset_name") != dataset or metadata.get("format") != "parquet" or
+                metadata.get("status") != "complete"):
+            raise ValueError("--dataset requires a complete Parquet dataset with a matching metadata name.")
+        validate_feature_dataset(metadata)
+    sample = args.sample or next((key for key, value in SAMPLES.items() if value == dataset), dataset)
     first, last = args.years
     if not cfg.RUN.SPLIT.FIRST_TEST_YEAR <= first <= last <= cfg.RUN.SPLIT.LAST_TEST_YEAR:
         raise ValueError("Requested years exceed this research config's test horizon.")
-    run_id = f"{args.command}_{args.sample}_{first}-{last}_{timestamp()}"
+    run_id = f"{args.command}_{sample}_{first}-{last}_{timestamp()}"
     folder = results_root(args.root, scrp=args.scrp, aihub=args.aihub) / run_id
     folder.mkdir(parents=True, exist_ok=False)
     # This resolved input and generated annual configs live with results, not config/.
     atomic_write(folder / "research.yaml", cfg.dump())
     prepare(str((folder / "research").resolve()), first, last, folder / "annual")
     record = {"schema_version": 1, "id": run_id, "model": MODEL_NAMES[args.command],
-              "sample": args.sample, "years": [first, last], "baseline_config": config_name,
+              "sample": sample, "dataset": dataset, "years": [first, last], "baseline_config": config_name,
               "backend": "aihub" if args.aihub else "scrp" if args.scrp else "local", "created_utc": timestamp(),
               "command": [sys.executable, str(Path(__file__).resolve()), *argv],
               "repository": str(ROOT), "python": sys.executable,
@@ -455,6 +465,7 @@ def list_experiments(root, refresh=False, experiment=None, *, verify=False):
                 saved = len(saved_years(path.parent))
                 action = submissions[-1]["state"] if submissions else "prepared"
             rows.append({"experiment": record["id"], "model": record["model"], "sample": record["sample"],
+                         "dataset": record.get("dataset", SAMPLES.get(record["sample"], record["sample"])),
                          "years": f"{record['years'][0]}:{record['years'][1]}",
                          "saved": f"{saved}/{record['years'][1]-record['years'][0]+1}",
                          "reports": reports, "sources": source_status,
@@ -557,7 +568,9 @@ def parser():
             backend.add_argument("--scrp", action="store_true")
             backend.add_argument("--aihub", action="store_true")
             cmd.set_defaults(scrp=False)
-            cmd.add_argument("--sample", choices=SAMPLES, required=True)
+            data = cmd.add_mutually_exclusive_group(required=True)
+            data.add_argument("--sample", choices=SAMPLES, help="Existing full/p05 dataset shorthand.")
+            data.add_argument("--dataset", choices=sorted(DATASET_PATHS), help="Explicit prepared Parquet dataset name.")
             cmd.add_argument("--years", type=year_range, required=True)
             cmd.add_argument("--config", help="Optional versioned research config; defaults listed in the run guide.")
         cmd.add_argument("--root", help="Results root; otherwise GKX_EXPERIMENT_ROOT or the site default.")

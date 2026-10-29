@@ -44,6 +44,10 @@ Before planning or modifying cluster execution, read SCRP_AGENTS.md. Use the off
 - Use resources sensibly without sacrificing correctness. Test important reusable logic.
 - Do not commit credentials, private data, or large generated files.
 
+## Markdown Formatting
+- Do not hard-wrap Markdown prose to a fixed line length (such as 80 or 120 characters). Keep each paragraph and each list item on a single source line, and let the Markdown reader wrap text for display.
+- Use line breaks for document structure and meaningful formatting, including headings, separate paragraphs, list items, tables, and code blocks. Do not reflow existing documents solely to apply this preference unless Phil asks.
+
 ## Working Style
 - Understand existing work before changing it. Stay within the requested scope.
 - Use judgment for routine implementation details. Ask when missing information affects the research direction or interpretation.

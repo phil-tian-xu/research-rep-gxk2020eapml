@@ -89,6 +89,7 @@ _C.RUN = CfgNode({
         "OLS_HUBER": {"HUBER_DELTA": None, "HUBER_QUANTILE": None, "SOLVER": "apg"},
         "ENET_HUBER": {"HUBER_DELTA": None, "HUBER_QUANTILE": None, "RHO": 0.5, "PENALTY_GRID": []},
         "OLS3_HUBER": {"FEATURES": ["mvel1", "bm", "mom12m"], "HUBER_QUANTILE": 0.999},
+        "OLS3": {"FEATURES": ["mvel1", "bm", "mom12m"]},
         "GLM_HUBER": {"PENALTY_GRID": [], "HUBER_QUANTILE": 0.999,
                       "KNOT_PROBABILITIES": [0., .25, .5, .75], "CENTERING": "training",
                       "DUMMY_PREFIX": "sic2_", "INTERCEPT": "training_mean",

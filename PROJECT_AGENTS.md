@@ -65,6 +65,69 @@ To be added.
 
 ## Development experiments
 
+Compact workflow audit (2026-10-29): verified against an isolated source snapshot of pre-change commit `de801f7968a1b5122ea3ee0993a919efba8bb1ea`. Original NN1/NN3 920-input runs (1987, fixed 5%, two seeds, two learning rates/two L1 values, eight epochs) and original Huber OLS3 match current code exactly in predictions, tuning and saved fit state. Explicit expanded NN3 and compact Huber OLS3 match legacy dataset selection exactly. Original model modules/config YAMLs, losses, optimizer, splits and fitting loops are unchanged. Historical production NN1 forecasts replay on CPU within 3.5315752e-7 of their saved CUDA values. Runtime/source metadata differs as expected; strict resume guards remain enabled.
+
+The audit added derived-feature manifest validation in the launcher and Parquet loader to reject stale expanded inputs, incorrect compact ordering and missing specifications before fitting. Original dataset names retain their existing contract. All 259 tests passed (90.269s). Every compact 5% row was independently checked: 182,367 observations, 718 months, identical original characteristics/industry/targets/positions, and zero macro error against prior-month raw values. Original-product probes agree exactly for all months. NN1–NN5, ordinary OLS and MSE OLS3 completed real 176-input checks with restoration/resume. A normal-grid/ten-seed compact NN3 1987 run completed with test R2 approximately -2.75572%; no full-period predictive comparison was run. Only the 5% compact dataset is prepared; full 176-input data still needs the documented preparation command. See `docs/working_notes/Compact Feature Audit.md` and `results/compact_audit_20261029/`. Original data/results and the Phil-only tracker were not modified.
+
+Paper feature baseline correction (2026-10-29): Phil explicitly rejected extending
+the paper's predictor set to 928 inputs. Current `gkx_expanded_full/p05` therefore
+copy the original 920-input source specification exactly: 94 characteristics,
+752 characteristic–macro products and 74 industry indicators, in source order.
+No standalone macro columns are added and no existing products are recomputed.
+Expanded preparation needs no raw macro files. Compact inputs remain 176.
+The corrected 5% expanded dataset has been rebuilt with 182,367 rows. All five
+feature-preparation tests and 30 launcher tests passed. All 182,367 rows were
+compared with the original source: every expanded predictor value and its order,
+target, date and row position match exactly. Compact observations/targets and
+shared stock/industry inputs also match. The result is recorded in
+`results/paper_feature_correction_20261029/verification.json`. A real NN3 launcher
+dry-run accepted the corrected dataset; no fitting was launched for this correction.
+
+The superseded 928-input generated dataset is preserved at
+`data/processed/archive/gkx_expanded_p05_928_20261029`; its metadata/files and
+earlier smoke results were not rewritten. The earlier expanded NN smoke below
+used that superseded specification and is not a result for the paper's 920-input
+baseline. Active code/docs now specify the 176/920 comparison. Model fitting,
+annual workflow logic, original datasets and the Phil-only tracker are unchanged.
+
+Compact feature interface (initial prototype, 2026-10-29, feature definition
+superseded by the correction above, `compact-features` branch): the existing
+`run_experiment.py` accepts `--dataset NAME` instead of `--sample full/p05`;
+the selectors are mutually exclusive and the resolved dataset/config is saved.
+Existing sample shortcuts and model settings retain their meaning. `--config`
+continues to select versioned research settings; no second fitting interface.
+`main.py`, `core/run.py`, the NN estimator/annual loop and existing Huber fitting
+code are unchanged. Annual model dispatch now also supports ordinary squared-error
+`ols` and `ols3-mse` (specifications OLS/OLS3); legacy `ols3` remains OLS3_HUBER.
+The new OLS runner reuses LinearRegressor and the existing split/checkpoint/report
+protocol, without train+validation refitting. Runtime hashes include the new
+runner; use fresh IDs here and retain original checkouts for historical resumes.
+
+`python -B -m core.data_cleaning.feature_gkx --dataset gkx_compact_p05` derives
+94 ranked characteristics + 8 lagged standalone macros + the existing industry
+dummies. The initial `gkx_expanded_p05` prototype appended 752 products from those same inputs; `_full`
+names select the full source panel. Original 920-input datasets keep their names.
+The builder streams verified Parquet parts, preserves observations/targets/row
+positions/audits, prefixes standalone macros with `macro_`, applies no reranking,
+resampling or scaling, and refuses existing destinations. Macro formulas/alignment
+reuse the existing preparation convention. It saves source/macro provenance and
+publishes completion metadata only after read-back/count/finite-value checks.
+At that stage both real 5% variants were prepared: 182,367 rows, 176/928 features. The new full
+variants have not been built. See `docs/working_notes/Compact Feature Experiments.md`.
+
+Verification: all 256 tests passed (99.589s), including feature preservation,
+lagged macro/product checks, corruption/missing-month guards, CLI compatibility,
+independent training-only OLS predictions, saved-state restoration and resume.
+Real 1987 runs through the ordinary launcher completed for OLS, OLS3, and NN1 on
+both feature sets. Their shared 3,892 test observations and restored predictions
+were verified in `results/compact_interface_smoke_20261029/verification.json`.
+OLS3 R2=0.331997%, matching the recorded squared-error threshold diagnostic;
+compact OLS R2=-43.367148%. NN smoke settings were deliberately one candidate,
+two seeds and three CPU epochs, with poor test scores; they establish interface
+execution only, not predictive performance or interaction recovery. Production
+NN settings remain unchanged. No full-period comparison or cluster job launched.
+The Phil-only progress tracker was not modified.
+
 Combined bundle recovery (2026-10-29): `run_experiment.py collect COMBINED_ID
 --repair-sources` restores missing/corrupt embedded files from intact originals
 only when their bytes match the frozen SHA-256 inventory. Intact copied files

@@ -19,7 +19,40 @@ DATASET_PATHS = {
     "gkx_parquet": data_path / "processed" / "gkx_parquet",
     "gkx_dev_p05_seed2020": data_path / "processed" / "gkx_dev_p05_seed2020",
     "gkx_dev_p10_seed2020": data_path / "processed" / "gkx_dev_p10_seed2020",
+    "gkx_compact_full": data_path / "processed" / "gkx_compact_full",
+    "gkx_compact_p05": data_path / "processed" / "gkx_compact_p05",
+    "gkx_expanded_full": data_path / "processed" / "gkx_expanded_full",
+    "gkx_expanded_p05": data_path / "processed" / "gkx_expanded_p05",
 }
+
+
+def validate_feature_dataset(metadata):
+    """Reject stale/mislabeled compact or expanded manifests before fitting."""
+    name = metadata.get("dataset_name", "")
+    if not isinstance(name, str) or not name.startswith(("gkx_compact_", "gkx_expanded_")):
+        return  # Original datasets keep their existing metadata contract.
+    kind = "compact" if name.startswith("gkx_compact_") else "expanded"
+    spec = metadata.get("feature_specification")
+    if not isinstance(spec, dict) or spec.get("kind") != kind:
+        raise ValueError(f"{name}: missing/mismatched feature specification; prepare this dataset again.")
+    chars, industries, macros, features = (spec.get("characteristics"), spec.get("industry_columns"),
+                                          spec.get("macro_columns"), metadata.get("feature_columns"))
+    for columns in (chars, industries, macros, features):
+        if (not isinstance(columns, list) or any(not isinstance(c, str) for c in columns) or
+                len(columns) != len(set(columns))):
+            raise ValueError(f"{name}: feature specification must declare unique column-name lists.")
+    if len(chars) != 94 or any(not c.startswith("sic2_") for c in industries):
+        raise ValueError(f"{name}: expected 94 characteristics and SIC industry indicators.")
+    macro_variables = ("dp", "ep", "bm", "ntis", "tbl", "tms", "dfy", "svar")
+    if kind == "compact":
+        expected_macros = [f"macro_{m}" for m in macro_variables]
+        expected = chars + expected_macros + industries
+        valid = macros == expected_macros and features == expected
+    else:
+        expected = chars + [f"{c}__macro_{m}" for m in macro_variables for c in chars] + industries
+        valid = not macros and len(features) == len(expected) and set(features) == set(expected)
+    if not valid or len(expected) != len(set(expected)):
+        raise ValueError(f"{name}: predictors do not match the {kind} feature definition; prepare this dataset again.")
 
 
 def load_dataset(name):

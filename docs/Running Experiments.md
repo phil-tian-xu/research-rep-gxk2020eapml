@@ -1,5 +1,13 @@
 # Running experiments
 
+Explicit dataset selection is available through `--dataset NAME`, as an alternative
+to the existing `--sample full/p05` shorthand. Use one selector per command.
+`--config NAME` continues to select research settings. The annual splits, fitting,
+validation selection, checkpoint/resume and collection protocols are shared.
+See [compact feature experiments](working_notes/Compact%20Feature%20Experiments.md)
+for dataset preparation, the 176/920-input comparison and ordinary OLS benchmarks.
+Existing `ols3` commands retain Huber loss; `ols3-mse` selects squared-error OLS-3.
+
 New dense runs save the selected fitted model for post-run Figures 4 and 5.
 
 NN local pilot (review the complete [model specification](working_notes/Neural%20Networks.md),

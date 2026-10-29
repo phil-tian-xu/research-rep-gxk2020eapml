@@ -9,8 +9,10 @@ For new experiments use `run_experiment.py` and the single
 | `pls` | `gkx_pls_v2.yaml` | Complete-array PLS, training-only standardization, K=0–29 |
 | `enet` | `gkx_enet_huber_v1.yaml` | Huber + elastic net, rho=0.5, ten penalties from 1e-4 to 1e-1 |
 | `ols3` | `gkx_ols3_huber_v1.yaml` | Huber regression on mvel1, bm, mom12m |
+| `ols` | `gkx_ols_v1.yaml` | Unpenalized squared-error OLS on the dataset's declared features |
+| `ols3-mse` | `gkx_ols3_mse_v1.yaml` | Squared-error OLS on mvel1, bm, mom12m |
 
-The CLI explicitly selects `--sample p05/full` and `--years`; a filename's
+The CLI explicitly selects either `--sample p05/full` or `--dataset NAME`, plus `--years`; a filename's
 historical sample label does not override those choices. It saves the resolved
 settings with each experiment. CPU, memory and concurrency options belong to
 submission records, not research model configs. New yearly configs are generated

@@ -33,7 +33,7 @@ def restore_predictor(tuning):
             raise ValueError("Invalid saved NN feature order.")
         predictor = NeuralNetworkRegressor.from_state(state)
         return predictor.predict, names, None
-    if model not in {"OLS", "OLS_HUBER", "OLS3_HUBER", "ENET_HUBER", "PCR", "PLS", "GLM_HUBER", "RF"}:
+    if model not in {"OLS", "OLS3", "OLS_HUBER", "OLS3_HUBER", "ENET_HUBER", "PCR", "PLS", "GLM_HUBER", "RF"}:
         raise NotImplementedError(f"No saved-predictor loader for {model}; no refit will be attempted.")
     if model == "RF":
         if not {"forest_state", "feature_names"} <= tuning.keys():

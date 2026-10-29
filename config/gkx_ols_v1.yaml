@@ -1,0 +1,16 @@
+# Squared-error, unpenalized OLS on every declared dataset feature.
+GENERAL:
+  NAME: "gkx_ols_v1"
+  TASK_TYPE: "run"
+DATA:
+  DATASET: "gkx_compact_p05"
+  FORMAT: "parquet"
+  BATCH_SIZE: 10000
+RUN:
+  FITTING: "dense"
+  MODELS:
+    ENABLED: ["OLS"]
+    FIT_INTERCEPT: true
+    STANDARDIZE: false
+  REPORT_TABLE1_FIGURE3: true
+  OUTPUT_DIR: "results/gkx_ols_v1"

@@ -1,0 +1,9 @@
+_BASE_: "gkx_ols_v1.yaml"
+GENERAL:
+  NAME: "gkx_ols3_mse_v1"
+RUN:
+  MODELS:
+    ENABLED: ["OLS3"]
+    OLS3:
+      FEATURES: ["mvel1", "bm", "mom12m"]
+  OUTPUT_DIR: "results/gkx_ols3_mse_v1"
