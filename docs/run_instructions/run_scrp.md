@@ -3,6 +3,9 @@
 Run these commands **on SCRP, in Bash**. Each project uses its own `.venv`.
 Copy the individual block you need.
 
+For the full research and transfer cycle, see the
+[research experiment workflow](research_workflow.md).
+
 The `run_experiment.py` commands assume the project uses our launcher. The Slurm
 commands apply to other projects too. Model names, samples and years below are
 examples from the current replication.
