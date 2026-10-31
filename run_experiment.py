@@ -613,6 +613,13 @@ def parser():
     removal.add_argument("experiment", help="Exact folder name or absolute path under the results root.")
     removal.add_argument("--root")
     removal.add_argument("--aihub", action="store_true")
+    diagnostics = commands.add_parser("diagnose-nn", help="Inspect saved NN fitting histories and retained parameters; never fit.")
+    diagnostics.add_argument("experiment", help="Saved experiment ID, imported folder, or fitted run directory.")
+    diagnostics.add_argument("--root")
+    diagnostics.add_argument("--aihub", action="store_true")
+    diagnostics.add_argument("--years", type=year_range, help="YEAR or FIRST:LAST; defaults to the recorded horizon (must be complete).")
+    diagnostics.add_argument("--candidate", type=int, help="One-based candidate to plot; defaults to the validation-selected candidate.")
+    diagnostics.add_argument("--output-root", default=str(ROOT / "results/nn_diagnostics"))
     return result
 
 
@@ -636,6 +643,11 @@ def main(argv=None):
         return rows
     if args.command == "combine":
         return combine_experiments(args.experiment, args)
+    if args.command == "diagnose-nn":
+        from core.nn_diagnostics import make_report
+        folder = resolve_experiment(args.experiment, args.root, aihub=args.aihub)
+        years = range(args.years[0], args.years[1] + 1) if args.years else None
+        return make_report(folder, args.output_root, years, args.candidate)
     if args.command == "remove":
         return remove_experiment(args.experiment, args.root, aihub=args.aihub)
     if args.command == "collect":

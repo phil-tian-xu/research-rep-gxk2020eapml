@@ -10,6 +10,8 @@ Existing `ols3` commands retain Huber loss; `ols3-mse` selects squared-error OLS
 
 New dense runs save the selected fitted model for post-run Figures 4 and 5.
 
+Saved NN fitting reports use `python -B run_experiment.py diagnose-nn EXPERIMENT_ID --years 2016`. The command accepts the existing ID/root lookup or a full imported experiment path and writes a separate HTML report, learning/objective/optimization/variation/tuning plots, per-layer parameter summaries and collapse review flags. It does not fit models or require the feature dataset/GPU. See [NN fitting diagnostics](working_notes/NN%20Fitting%20Diagnostics.md) for the worked NN1 example, outputs and interpretation. The default plots show the selected candidate; `--candidate N` inspects another candidate's saved histories. All candidate histories are exported; full weight summaries concern the retained selected ensemble.
+
 NN local pilot (review the complete [model specification](working_notes/Neural%20Networks.md),
 including exact loss, L1 parameter set, initialization and author-unverified choices):
 
