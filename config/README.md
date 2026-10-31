@@ -27,8 +27,10 @@ change; select it using `--config NAME`.
 ## Neural-network configurations
 
 `gkx_nn1_v1` defaults to the fixed 5% Parquet sample, 1987-2016 horizon,
-CUDA, and the published batch/epoch/patience/ensemble settings. NN2-NN5 inherit
+CUDA, and the published batch/epoch/patience/ensemble settings. NN2-NN10 inherit
 that config and select their fixed architectures. The launcher overrides sample
 and requested years as usual. Review
 [`docs/working_notes/Neural Networks.md`](../docs/working_notes/Neural%20Networks.md)
 for the exact objective, penalty normalization and implementation choices.
+
+`gkx_nn6_v1` through `gkx_nn10_v1` are Phil's approved deeper, wider research extensions, with six through ten hidden layers. Their first hidden widths are 64, 128, 256, 512 and 1024; each subsequent hidden width halves down to 2. NN1-NN5 retain their original widths. All ten use the same squared-error-plus-L1 objective and training settings; only NN1-NN5 are the paper's architectures. See the model note for the full width lists and interpretation limits.

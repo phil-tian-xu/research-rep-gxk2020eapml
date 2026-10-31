@@ -58,15 +58,15 @@ The official guide describes home backups; large-data and archive have no automa
 
 Node-local `/tmp` is temporary space, not the sole location for checkpoints.
 
-Proposed layout, not yet confirmed as configured:
+Observed layout from Phil's supplied SCRP command output:
 ```text
-~/research-rep-gxk2020eapml/                 repository
-~/large-data/research-rep-gxk2020eapml/data/ actual datasets
-~/research-rep-gxk2020eapml/data            symlink to that data directory
+~/research-rep-gxk2020eapml/                         repository
+~/research-rep-gxk2020eapml/data/processed            symlink to ~/large-data/GKX2020/data/processed
+~/large-data/GKX2020/data/processed/                 prepared datasets
+~/large-data/GKX2020/results/experiments/             experiment outputs
 ```
 
-This preserves the repository's `data/processed/...` paths. Large results can use the same arrangement for `results/` if needed. Verify the actual targets
-and existing contents before creating links; never replace a nonempty directory without preserving its contents. Use the home-relative large-data entry point and verify its resolved path instead of assuming a physical mount path.
+The verified `data/processed` link resolves to `/data/users/s1155269217/GKX2020/data/processed`. Only `data/processed` was linked in that output; project `data/raw` is a separate location and initially did not exist. Check raw inputs separately before server-side preparation. Verify current link targets and existing contents before changing paths; never replace a nonempty directory without preserving its contents. Use the home-relative large-data entry point and verify its resolved path instead of assuming a physical mount path.
 ## Running computation
 
 This repository includes workloads that need CPU resources and workloads that need GPU resources. Not every task needs both. Follow Phil's request and the
@@ -78,33 +78,79 @@ with resources allocated through Slurm.
 Use `compute` for interactive work on allocated resources and `sbatch` for unattended runs. Check current account limits and resource availability before
 submitting a job, and request resources appropriate to the task.
 
-## Data transfer to SCRP
-Agreed on 2026-09-24: use a separate **PC on the CUHK campus network as the intermediary for data uploads**. Transfers from the primary PC repeatedly disconnected; the campus-PC test was fast and successful. The exact cause of the earlier connection resets was not established.
-### Standard workflow
-1. Transfer data from the primary PC to the campus PC using **Baidu Netdisk**.
-2. Place the downloaded files or directories under **`D:/data_transfer/`** on the campus PC.
-3. Upload from the campus PC to SCRP using **SFTP**, the preferred transfer method.
-4. Verify completeness and, where available, checksums before using the uploaded data. Preserve the original local copies.
+## Data and result transfers
+Phil's preference, clarified on 2026-10-30: choose the transfer route according to file size, connectivity and the current request. Direct uploads from the main PC are acceptable, especially for small files. The campus PC is an optional intermediary. When the intended route is unclear, present both options with commands labeled for the PC on which they run; do not assume that an intermediary is required.
+
+**Campus PC transfer directory: `D:\data_transfer`.** Phil requires this directory for all campus-PC file transfers, including uploads, downloads, datasets, result archives and checksums, especially large files. Create it before downloading and keep any transfer subfolders beneath it. Main-PC commands use the files' actual local location; the campus directory does not determine the main PC's path. Verify that staged files exist before uploading; creating the directory does not populate it.
+
+**Campus PC — PowerShell, prepare the transfer directory:**
+
+```powershell
+$transferDir = 'D:\data_transfer'
+New-Item -ItemType Directory -Path $transferDir -Force | Out-Null
+```
+
+### Transfer routes
+
+1. **Direct: main PC → SCRP.** Upload from the files' actual location on the main PC using SFTP. Prefer this simple route for small inputs when the connection works; no staging copy or Netdisk transfer is required.
+2. **Via an intermediary: main PC → Baidu Netdisk → campus PC → SCRP.** This remains useful for large transfers or unreliable direct connections. Download the files into `D:\data_transfer` on the campus PC before uploading them from there. For results, reverse the route: SCRP → campus PC (`D:\data_transfer`) → Baidu Netdisk → main PC. Keep the archive and its checksum together through both transfer stages.
+
+Earlier large transfers from the primary PC repeatedly disconnected, while the campus-PC test was fast and successful (2026-09-24). The cause was not established. That observation supports the intermediary option for unreliable transfers; it does not rule out direct uploads of other files.
+
+For either route, verify the local source files and remote destination before transferring. Verify completeness and, where available, checksums before using the uploaded data. Preserve the original local copies.
+
+Follow Phil's requested transfer route. When recommending a route, measure the actual file/archive size and use the observed connection reliability; predictor count alone does not establish that a result archive is small. Transfer only the requested dataset or experiment. A complete experiment download includes all files inside that one selected experiment folder. See [the research workflow](docs/run_instructions/research_workflow.md#9-transfer-results-back-and-verify-locally) for packaging, checksums, download and extraction.
 
 ### Connection and destination
 - **Server:** `scrp-login.econ.cuhk.edu.hk`
 - **Username:** `s1155269217`
-- **Local staging directory:** `D:/data_transfer/`
+- **Campus PC source/download directory:** `D:\data_transfer`; verify the required files have been downloaded there before uploading.
+- **Main PC source/download directory:** the files' actual local folder, set explicitly in the command.
 - **Remote project data root:** `/data/users/s1155269217/GKX2020/data/`
 - The remote subdirectory depends on the dataset and its purpose. Prepared datasets currently go under `processed/`.
 
 ### SFTP File Transfer
-Prefer a **single PowerShell command run on the campus PC**, supplying the SFTP instructions automatically. Prompt for authentication; do not embed passwords.
+Provide separate command blocks for setup, transfer and verification, with each block's purpose, PC and shell stated. The SFTP block can supply its instructions automatically through PowerShell. Prompt for authentication; do not embed passwords. Clearly distinguish local Windows paths from remote SCRP paths.
 
-Example: upload `D:/data_transfer/gkx_dev_p05_seed2020_parquet` into the remote `processed/` directory:
+Direct-upload example, run on the main PC from its actual project data folder. The remote project `data/raw` directory must already exist:
 
+```powershell
+$rawDir = 'E:/Workstation/coding_projects/coding_research/paper_replication/research-rep-gxk2020eapml/data/raw'
+if ((Test-Path -LiteralPath "$rawDir/macro_predictor.csv" -PathType Leaf) -and
+    (Test-Path -LiteralPath "$rawDir/risk_free_rate_fama_french.csv" -PathType Leaf)) {
+    @(
+        'cd /home/users/s1155269217/research-rep-gxk2020eapml/data/raw'
+        ('lcd "{0}"' -f $rawDir)
+        'put macro_predictor.csv'
+        'put risk_free_rate_fama_french.csv'
+        'ls -l'
+        'bye'
+    ) | sftp -o ServerAliveInterval=30 -o ServerAliveCountMax=6 s1155269217@scrp-login.econ.cuhk.edu.hk
+} else {
+    throw "Required CSV files are missing from $rawDir on this PC. Use their actual local folder."
+}
 ```
-@('cd /data/users/s1155269217/GKX2020/data/processed', 'put -R D:/data_transfer/gkx_dev_p05_seed2020_parquet', 'bye') | sftp -o ServerAliveInterval=30 -o ServerAliveCountMax=6 s1155269217@scrp-login.econ.cuhk.edu.hk
+
+Intermediary-upload example, run on the campus PC after downloading `gkx_dev_p05_seed2020_parquet` to `D:/data_transfer/`; the local folder must be present before running the command:
+
+```powershell
+$transferDir = 'D:\data_transfer'
+$dataset = 'gkx_dev_p05_seed2020_parquet'
+if (-not (Test-Path -LiteralPath (Join-Path $transferDir $dataset) -PathType Container)) {
+    throw 'Download the dataset to D:\data_transfer before uploading.'
+}
+
+@(
+    ('lcd "{0}"' -f $transferDir.Replace('\', '/'))
+    'cd /data/users/s1155269217/GKX2020/data/processed'
+    "put -R $dataset"
+    'bye'
+) | sftp -o ServerAliveInterval=30 -o ServerAliveCountMax=6 s1155269217@scrp-login.econ.cuhk.edu.hk
 ```
 
 The remote parent directory must already exist. If the dataset directory already exists, its `mkdir` error is expected; inspect any other errors. `put -R` uploads recursively and overwrites matching remote filenames—it does not provide incremental synchronization.
 
-For future transfers, adapt the source folder and remote destination while retaining this campus-PC workflow.
+For future transfers, select either route and adapt the actual source folder and remote destination. If the route or source PC is uncertain, give both direct and intermediary options instead of fixing one route.
 
 ## Running Project on SCRP
 Please refer to `docs/Running Python on SCRP` for detailed instructions.

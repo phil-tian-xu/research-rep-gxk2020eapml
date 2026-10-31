@@ -14,6 +14,7 @@ from core.data_query.parquet_dataset import ParquetPanel
 from core.combined_experiments import resolve_annual_run
 from core.figure4_importance import characteristic_groups, streaming_zero_out
 from core.models.saved_fit import restore_forest, restore_spline
+from core.models.nn_architectures import ARCHITECTURES
 from core.run_state import dataset_identity, load_run_config, read_checkpoints
 
 
@@ -25,7 +26,7 @@ def restore_predictor(tuning):
     Only explicitly recognized linear models may use the coefficient shortcut.
     """
     model = tuning["specification"]
-    if model in {"NN1", "NN2", "NN3", "NN4", "NN5"}:
+    if model in ARCHITECTURES:
         from core.models.neural_network import NeuralNetworkRegressor
         names = list(tuning["feature_names"])
         state = tuning["nn_state"]
@@ -65,7 +66,7 @@ def verify_predictions(predict, window, names, record):
     expected = pd.DataFrame(record["predictions"])
     year, model = record["metrics"]["test_year"], record["metrics"]["specification"]
     # Float32 CUDA and CPU kernels need not have identical rounding.
-    nn_model = model in {"NN1", "NN2", "NN3", "NN4", "NN5"}
+    nn_model = model in ARCHITECTURES
     atol, rtol = (1e-6, 1e-5) if nn_model else (1e-10, 1e-10)
     if (expected.empty or expected.isna().any().any() or expected.row_position.duplicated().any()
             or not expected.test_year.eq(year).all() or not expected.specification.eq(model).all()):

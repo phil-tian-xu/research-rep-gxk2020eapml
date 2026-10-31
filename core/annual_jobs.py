@@ -16,6 +16,7 @@ import time
 import pandas as pd
 import yaml
 
+from core.models.nn_architectures import ARCHITECTURES
 from core.run_state import (CheckpointIndex, atomic_write, load_run_config,
                             run_lock, runtime_identity)
 from utils.config_utils.config import CfgNode
@@ -29,9 +30,9 @@ def prepare(config, first_year, last_year, output):
         raise ValueError("Requested years must be within the base configuration's test horizon.")
     if cfg.DATA.get("FORMAT") != "parquet" or cfg.RUN.get("FITTING") != "dense":
         raise ValueError("Annual jobs currently require the complete-array Parquet workflow.")
-    if list(cfg.RUN.MODELS.ENABLED) not in (["OLS"], ["OLS3"], ["PCR"], ["PLS"], ["ENET_HUBER"], ["OLS3_HUBER"], ["GLM_HUBER"], ["RF"],
-                                          ["NN1"], ["NN2"], ["NN3"], ["NN4"], ["NN5"]):
-        raise ValueError("Select exactly one supported annual model (including NN1-NN5).")
+    supported = {"OLS", "OLS3", "PCR", "PLS", "ENET_HUBER", "OLS3_HUBER", "GLM_HUBER", "RF"} | set(ARCHITECTURES)
+    if len(cfg.RUN.MODELS.ENABLED) != 1 or cfg.RUN.MODELS.ENABLED[0] not in supported:
+        raise ValueError("Select exactly one supported annual model (including NN1-NN10).")
     folder = Path(output).resolve()
     folder.mkdir(parents=True, exist_ok=False)
     cfg.RUN.SPLIT.FIRST_TEST_YEAR = first_year

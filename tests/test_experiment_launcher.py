@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -111,6 +112,36 @@ class ExperimentLauncherTests(unittest.TestCase):
         self.assertEqual(record["submissions"][-1]["job_id"], "397999")
         self.assertEqual(record["submissions"][-1]["state"], "submitted")
         self.assertTrue(Path(command[-2]).exists())
+
+    def test_nn6_to_nn10_use_existing_settings_and_local_scrp_aihub_routes(self):
+        reference = launcher.load_config("gkx_nn1_v1").RUN
+        for depth in range(6, 11):
+            for backend in ("--local", "--scrp", "--aihub"):
+                with self.subTest(depth=depth, backend=backend):
+                    folder = self.prepare(f"nn{depth}", backend, "1987", "p05")
+                    record = launcher.read_launch(folder)
+                    _, plan = load_plan(folder / "annual")
+                    self.assertEqual(record["model"], f"NN{depth}")
+                    self.assertEqual(record["baseline_config"], f"gkx_nn{depth}_v1")
+                    self.assertEqual(plan["config"]["RUN"]["MODELS"]["NN"], dict(reference.MODELS.NN))
+                    self.assertEqual(plan["config"]["RUN"]["EVALUATION"], dict(reference.EVALUATION))
+                    self.assertEqual(record["resources"]["parallel"], 1)
+                    self.assertEqual(record["resources"]["gpus"], 0 if backend == "--local" else 1)
+                    command = record["submissions"][0].get("sbatch_command", [])
+                    if backend == "--scrp":
+                        self.assertIn("--gpus=a100:1", command)
+                        self.assertEqual(Path(command[-2]).name, "run_nn_scrp.sh")
+                    elif backend == "--aihub":
+                        self.assertIn("--gres=gpu:1", command)
+
+    def test_launcher_can_recognize_nn10_without_optional_torch(self):
+        code = ('import sys; sys.modules["torch"] = None; '
+                'import run_experiment as launcher; '
+                'assert launcher.MODEL_NAMES["nn10"] == "NN10"; '
+                'assert launcher.BASELINES["nn10"] == "gkx_nn10_v1"')
+        result = subprocess.run([sys.executable, "-B", "-c", code], cwd=launcher.ROOT,
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_nn_gpu_requests_and_model_config_are_preserved(self):
         for backend, gpu_flag in (("--scrp", "--gpus=a100:1"), ("--aihub", "--gres=gpu:1")):

@@ -16,9 +16,7 @@ import torch
 from torch import nn
 
 from core.model_inputs import positive_integer, target_vector
-
-
-ARCHITECTURES = {f"NN{depth}": (32, 16, 8, 4, 2)[:depth] for depth in range(1, 6)}
+from core.models.nn_architectures import ARCHITECTURES
 
 
 class ReturnNetwork(nn.Module):

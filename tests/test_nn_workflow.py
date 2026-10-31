@@ -21,8 +21,8 @@ from utils.general_utils import load_config
 class NNWorkflowTests(unittest.TestCase):
     setUp = fixtures.BatchWorkflowTests.setUp
 
-    def configure(self):
-        self.cfg.RUN.MODELS = load_config("gkx_nn1_v1").RUN.MODELS
+    def configure(self, depth=1):
+        self.cfg.RUN.MODELS = load_config(f"gkx_nn{depth}_v1").RUN.MODELS
         settings = self.cfg.RUN.MODELS.NN
         settings.DEVICE = "cpu"
         settings.LEARNING_RATE_GRID = [.001, .01]
@@ -68,6 +68,42 @@ class NNWorkflowTests(unittest.TestCase):
         with patch("core.nn_run.load_window", side_effect=AssertionError("must not load")):
             with self.assertRaisesRegex(ValueError, "learning rate"):
                 run_parquet(self.panel, self.cfg, checkpoint_dir=folder)
+
+    def test_nn6_to_nn10_fit_restore_report_and_resume_through_existing_workflow(self):
+        from core.models.nn_architectures import ARCHITECTURES
+
+        for depth in range(6, 11):
+            with self.subTest(depth=depth):
+                self.configure(depth)
+                self.cfg.RUN.SPLIT.LAST_TEST_YEAR = 2003
+                settings = self.cfg.RUN.MODELS.NN
+                settings.LEARNING_RATE_GRID = [.001]
+                settings.ENSEMBLE_SIZE = 1
+                settings.MAX_EPOCHS = 2
+                settings.BATCH_SIZE = 32
+                folder = create_run(self.cfg, self.panel.info)
+                name = f"NN{depth}"
+                with redirect_stdout(StringIO()):
+                    run_parquet(self.panel, self.cfg, checkpoint_dir=folder)
+                records = read_checkpoints(folder, self.cfg)
+                self.assertEqual(set(records), {(2003, name)})
+                record = records[2003, name]
+                tuning = record["tuning"]
+                self.assertEqual(tuning["hidden_sizes"], list(ARCHITECTURES[name]))
+                self.assertEqual(tuning["objective"], "mean_half_squared_error_plus_l1_dense_kernels")
+                predict, names, beta = restore_predictor(tuning)
+                self.assertIsNone(beta)
+                verified = verify_predictions(predict, self.panel.window(2003, 2003), names, record)
+                self.assertEqual((verified["prediction_atol"], verified["prediction_rtol"]), (1e-6, 1e-5))
+                table, complexity, curves = report_tables(records, self.cfg)
+                self.assertTrue(table.complete_horizon.all())
+                self.assertTrue(table.paper_full_universe_1987_2016_r2_percent.isna().all())
+                self.assertTrue(complexity.empty)
+                self.assertEqual(list(curves.model), [name])
+                self.assertTrue(curves.selected.all())
+                self.assertTrue((folder / "years" / "2003" / f"{name}_training.csv").is_file())
+                with redirect_stdout(StringIO()), patch("core.nn_run.load_window", side_effect=AssertionError("must skip")):
+                    run_parquet(self.panel, self.cfg, checkpoint_dir=folder)
 
 
 if __name__ == "__main__":

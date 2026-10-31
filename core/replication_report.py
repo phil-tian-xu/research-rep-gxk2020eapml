@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from core.models.nn_architectures import ARCHITECTURES
 from core.run_state import atomic_write, load_run_config, read_checkpoints, resolve_run_dir, run_lock
 
 
@@ -174,7 +175,7 @@ def report_tables(records, cfg):
                         validation_loss=candidate["validation_loss"],
                         loss_above_best=candidate["validation_loss"] - scores[selected], selected=index == selected))
             complexity.append(row)
-    for model in (name for name in models if name in {"NN1", "NN2", "NN3", "NN4", "NN5"}):
+    for model in (name for name in models if name in ARCHITECTURES):
         for year in years:
             if (year, model) not in records:
                 continue

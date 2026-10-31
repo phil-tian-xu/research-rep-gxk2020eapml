@@ -18,12 +18,15 @@ uv sync --extra nn
 .venv\Scripts\python.exe -B run_experiment.py nn1 --local --sample p05 --years 1987 --cpus 4
 ```
 
-`nn2` through `nn5` select the other published architectures. All use the same
-annual workflow, `list`, `resume`, `collect`, and saved-state importance interface.
-Training CSV/plots live inside each annual run. NN cluster jobs request one GPU
-per task; default concurrency is one and initial RAM request is 64G. Verify the
-small cluster deployment and live GPU quotas before a full run. CPU model GPU
-requests are rejected. NN requires its optional dependency to remain installed.
+`nn2` through `nn5` select the other published architectures. `nn6` through `nn10` select Phil's approved deeper, wider pyramids: first hidden widths 64, 128, 256, 512 and 1024, each halving down to 2. These five are research extensions. All ten use the same annual workflow, squared-error-plus-L1 training, `list`, `status`, `resume`, `collect`, and saved-state importance interface. Training CSV/plots live inside each annual run. NN cluster jobs request one GPU per task; default concurrency is one and initial RAM request is 64G. Verify the small cluster deployment and live GPU quotas before a full run. CPU model GPU requests are rejected. NN requires its optional dependency to remain installed.
+
+Prepare an NN6 compact-data pilot without fitting, on the main PC in PowerShell:
+
+```powershell
+.venv\Scripts\python.exe -B run_experiment.py nn6 --local --dataset gkx_compact_p05 --years 1987 --dry-run
+```
+
+Use `nn7`, `nn8`, `nn9` or `nn10` for the other extensions; their default configs are `gkx_nn7_v1` through `gkx_nn10_v1`. The existing `--config` flag remains available. After deploying this addition, use fresh experiment IDs because execution fingerprints include the shared architecture definitions. Preserve the original checkout for resuming older experiments. Width and depth both increase; review validation behavior and the effect of the unnormalized L1 penalty before interpreting performance changes.
 
 SCRP A100 pilot: run from the updated project directory **on SCRP**, with the
 fixed-5% Parquet data present. Install the NN extra before preparing a run:

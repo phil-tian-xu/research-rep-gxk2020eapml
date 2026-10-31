@@ -19,6 +19,7 @@ from core.annual_jobs import collect, load_plan, prepare
 from core.combined_experiments import (combination_plan, load_combination, collect_combination,
                                        load_source_bundle, source_directory, verify_source_bundle)
 from core.data_query.datasets import DATASET_PATHS, validate_feature_dataset
+from core.models.nn_architectures import ARCHITECTURES
 from core.run_state import atomic_write, load_run_config, read_checkpoints, run_lock, runtime_identity
 from utils.general_utils import load_config
 
@@ -27,8 +28,8 @@ ROOT = Path(__file__).resolve().parent
 BASELINES = {"pcr": "gkx_pcr_full_v5", "pls": "gkx_pls_v2",
              "enet": "gkx_enet_huber_v1", "ols3": "gkx_ols3_huber_v1", "glm": "gkx_glm_huber_v1", "rf": "gkx_rf_v1"}
 MODEL_NAMES = {"pcr": "PCR", "pls": "PLS", "enet": "ENET_HUBER", "ols3": "OLS3_HUBER", "glm": "GLM_HUBER", "rf": "RF"}
-BASELINES.update({f"nn{i}": f"gkx_nn{i}_v1" for i in range(1, 6)})
-MODEL_NAMES.update({f"nn{i}": f"NN{i}" for i in range(1, 6)})
+BASELINES.update({name.lower(): f"gkx_{name.lower()}_v1" for name in ARCHITECTURES})
+MODEL_NAMES.update({name.lower(): name for name in ARCHITECTURES})
 BASELINES.update({"ols": "gkx_ols_v1", "ols3-mse": "gkx_ols3_mse_v1"})
 MODEL_NAMES.update({"ols": "OLS", "ols3-mse": "OLS3"})
 SAMPLES = {"full": "gkx_parquet", "p05": "gkx_dev_p05_seed2020_parquet"}
@@ -84,7 +85,7 @@ def execution_options(args, previous=None):
         if value is not None:
             options[key] = value
     model = getattr(args, "command", "")
-    is_nn = model in {f"nn{i}" for i in range(1, 6)} or options.get("gpus", 0) > 0
+    is_nn = MODEL_NAMES.get(model) in ARCHITECTURES or options.get("gpus", 0) > 0
     options.setdefault("parallel", 1 if is_nn else 4 if args.scrp else 1)
     options.setdefault("cpus", 8)
     options.setdefault("gpus", 1 if is_nn and (args.scrp or aihub) else 0)
@@ -139,7 +140,7 @@ def prepare_experiment(args, argv):
     cfg = load_config(config_name)
     if list(cfg.RUN.MODELS.ENABLED) != [MODEL_NAMES[args.command]]:
         raise ValueError("The research config must enable only the requested model.")
-    is_nn = MODEL_NAMES[args.command] in {f"NN{i}" for i in range(1, 6)}
+    is_nn = MODEL_NAMES[args.command] in ARCHITECTURES
     if slurm and is_nn and (options["gpus"] != 1 or cfg.RUN.MODELS.NN.DEVICE != "cuda"):
         raise ValueError("Cluster NN jobs require one GPU and NN.DEVICE=cuda.")
     if not is_nn and options["gpus"]:
@@ -306,9 +307,9 @@ def execute(folder, args, argv):
         args.aihub = record["backend"] == "aihub"
         slurm = args.scrp or args.aihub
         options = execution_options(args, record["resources"])
-        if slurm and record["model"] in {f"NN{i}" for i in range(1, 6)} and options["gpus"] != 1:
+        if slurm and record["model"] in ARCHITECTURES and options["gpus"] != 1:
             raise ValueError("Cluster NN jobs require one GPU per annual task.")
-        if record["model"] not in {f"NN{i}" for i in range(1, 6)} and options["gpus"]:
+        if record["model"] not in ARCHITECTURES and options["gpus"]:
             raise ValueError("Only NN jobs use GPUs.")
         if args.after and not slurm:
             raise ValueError("--after applies only to Slurm submissions.")
@@ -331,7 +332,7 @@ def execute(folder, args, argv):
         record["resources"] = options
         record_path = folder / "launch.json"
         if slurm:
-            scrp_nn = args.scrp and record["model"] in {f"NN{i}" for i in range(1, 6)}
+            scrp_nn = args.scrp and record["model"] in ARCHITECTURES
             script_name = ("run_annual_aihub.sh" if args.aihub else
                            "run_nn_scrp.sh" if scrp_nn else "run_annual_scrp.sh")
             script = submission_dir / script_name

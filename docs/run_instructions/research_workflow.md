@@ -1,6 +1,6 @@
 # Research experiment workflow
 
-This guide follows an experiment from local development to server execution and back to local analysis. The workflow is reusable; the commands use this project's launcher, accounts and datasets as examples. Last reviewed: 2026-10-29.
+This guide follows an experiment from local development to server execution and back to local analysis. The workflow is reusable; the commands use this project's launcher, accounts and datasets as examples. Last reviewed: 2026-10-30.
 
 ## Workflow at a glance
 
@@ -11,28 +11,33 @@ This guide follows an experiment from local development to server execution and 
 | [1. Prepare data](#1-prepare-data-on-the-main-pc)                        | Choose the security sample and predictors; prepare that dataset | Main PC              | Dataset, features and source versions are clear               |
 | [2. Develop and test](#2-develop-and-test-locally)                       | Modify the method and check small-sample results                 | Main PC              | Training, predictions and diagnostics have been checked       |
 | [3. Synchronize code](#3-record-and-synchronize-the-tested-code)         | Commit/push tested changes and pull on the servers               | Main PC and servers  | Each experiment has a known code version                      |
-| [4. Transfer inputs](#4-transfer-input-data-through-the-campus-pc)       | Main PC → Netdisk → campus PC → server                           | Both PCs and servers | Required datasets are complete on the target server           |
+| [4. Transfer inputs](#4-transfer-required-input-data)                    | Main PC → server, directly or via the campus PC                  | Selected PC and server | Required datasets are complete on the target server         |
 | [5. Test on the server](#5-run-a-small-server-test)                      | Run a small sample with the intended server setup                | SCRP / AI Hub        | The pilot finishes and its diagnostics are reviewed           |
 | [6. Run the full experiment](#6-launch-the-full-experiments)             | Submit each planned model, dataset, config and test period       | SCRP / AI Hub        | Experiment IDs and intended coverage are recorded             |
 | [7. Monitor execution](#7-monitor-progress-and-handle-interruptions)     | Check queues, saved progress, logs and failures                  | SCRP / AI Hub        | All planned annual fits are saved                             |
 | [8. Collect and verify](#8-collect-and-verify-on-the-server)             | Build pooled reports and complete result bundles                 | SCRP / AI Hub        | Coverage and saved files pass verification                    |
-| [9. Bring results home](#9-transfer-results-back-and-verify-locally)     | Server → campus PC → Netdisk → main PC                           | Servers and both PCs | Archives and extracted results pass local verification        |
+| [9. Bring results home](#9-transfer-results-back-and-verify-locally)     | Server → main PC, directly or via the campus PC                  | Server and selected PCs | Archives and extracted results pass local verification     |
 | [10. Analyze and iterate](#10-analyze-document-and-start-the-next-round) | Compare methods, investigate differences and document findings   | Main PC              | Reviewed outputs and the next research questions are recorded |
 
 Monitoring continues throughout server execution. Input transfers are needed when deploying a dataset for the first time or introducing a new data version.
 
+Follow the requested transfer route. Otherwise, choose according to the actual file/archive size and connection reliability: small files can go directly between the main PC and server; the campus PC is an optional intermediary for large files or unreliable direct connections. If the intended route is unclear, present both options with commands labeled for the PC on which they run. Measure the archive before describing it as small; predictor count alone does not determine result size.
+
+**Campus PC: use `D:\data_transfer` for every file transfer**, including datasets, result archives and checksums. Create the folder before downloading; keep any transfer subfolders beneath it. Main-PC paths are separate: the examples use `E:\data_transfer`, but use the actual folder if files are already stored elsewhere. Creating a directory does not copy files into it.
+
 | Location/service | Role                                                                   |
 | ---------------- | ---------------------------------------------------------------------- |
 | Main PC          | Data preparation, model development, local tests and research analysis |
-| Campus PC        | Transfer bridge; use `D:\data_transfer` for staging                    |
+| Campus PC        | Optional transfer bridge; all transfer staging uses `D:\data_transfer` |
 | SCRP / AI Hub    | Server pilots, full experiments and storage of completed runs          |
 | Git              | Synchronize code and experiment settings                               |
-| Netdisk          | Exchange datasets and result archives between the two PCs              |
+| Netdisk          | Optional exchange of datasets and result archives between the two PCs |
 
 ## Using the commands
 
 - **PowerShell** blocks run on the specified Windows PC.
 - **Bash** blocks run after logging into the specified server.
+- Run separate setup, transfer and verification blocks in order, using the same terminal for variables shared between blocks. Each block states its purpose and the PC/server on which it runs.
 - Each project uses its own `.venv`. Replace values beginning with `PASTE_` or  `PATH/TO/` before running a block.
 - Re-enter the project and reset the relevant variables after opening a new terminal or reconnecting. Initial server checkout/data-path setup is assumed; use the linked site guides when setting up a server for the first time.
 - An **experiment ID** is used by `resume`, `status` and `collect`. A **Slurm job ID** is used by `squeue`, `sacct` and `scancel`.
@@ -141,7 +146,7 @@ $run = "PASTE_LOCAL_EXPERIMENT_ID"
 
 For the 920-input NN3 comparison, repeat the local model command with `gkx_expanded_p05` or the original `gkx_dev_p05_seed2020_parquet`, retaining the chosen model config and years. Each invocation creates its own experiment ID. Both feature specifications tune separately on validation data; using the same config keeps the candidate settings aligned without forcing the same selected parameters.
 
-The launcher supports `pcr`, `pls`, `enet`, `ols3`, `ols`, `ols3-mse`, `glm`, `rf` and `nn1` through `nn5`. `--config NAME` selects a versioned research configuration and must match the requested method; dataset and years are selected explicitly by the launcher. Refer to the [configuration reference](../../config/README.md) for defaults.
+The launcher supports `pcr`, `pls`, `enet`, `ols3`, `ols`, `ols3-mse`, `glm`, `rf` and `nn1` through `nn10`. NN6-NN10 are the approved deeper, wider research extensions; NN1-NN5 retain the paper's architectures. `--config NAME` selects a versioned research configuration and must match the requested method; dataset and years are selected explicitly by the launcher. Refer to the [configuration reference](../../config/README.md) for defaults.
 
 | Command | Regression benchmark |
 | --- | --- |
@@ -177,7 +182,7 @@ git push
 
 Stage code, settings and relevant notes deliberately. Keep datasets, generated result archives and credentials outside Git.
 
-From the campus PC, choose the server connection you need:
+From the main PC or campus PC with a working server connection, choose the server you need:
 
 ```powershell
 # SCRP
@@ -203,11 +208,13 @@ git rev-parse HEAD
 
 Use the project's required extras; `--extra nn` installs its NN dependency. Install dependencies on the login/head node. Preserve the original checkout when queued/running/resumable experiments depend on it. The compact-feature changes affect execution hashes, so use fresh IDs for new experiments and retain the original code/environment for unfinished historical runs. Git changes do not transfer or prepare research datasets.
 
-## 4. Transfer input data through the campus PC
+## 4. Transfer required input data
 
-**Main PC → Netdisk → campus PC → SCRP / AI Hub**
+**Direct: main PC → SCRP / AI Hub. Optional intermediary: main PC → Netdisk → campus PC → SCRP / AI Hub.**
 
-Use the Netdisk desktop client for the PC-to-PC stages. Keep each archive and its checksum file together. The campus PC uploads them to the selected server using SFTP. Use this step only for required datasets that the server does not already have in the correct version.
+Use SFTP from the PC that currently holds the source files. For small inputs, such as the macro and risk-free CSV files used by compact preparation, upload directly from the main PC's actual project folder; no archive or intermediary is required. See the [direct and intermediary SFTP examples](../../SCRP_AGENTS.md#sftp-file-transfer). Check that the local files exist and the remote destination is correct before uploading. Use this step only for required files or datasets that the server does not already have in the correct version.
+
+The archive workflow below supports both routes. For direct uploads, keep the archive and checksum on the main PC and use that PC in Sections 4.2–4.3. For the intermediary route, use the Baidu Netdisk desktop client to download both files into `D:\data_transfer` on the campus PC first, then verify and upload there. Earlier disconnections during large direct transfers make the campus PC useful as a fallback; they do not make it mandatory for every transfer.
 
 Prepare each selected panel once on the main PC and transfer that same completed folder to the servers that need it. Transfer the 5% variant for the server pilot, then its full-universe counterpart for production. A complete compact or expanded panel can be fitted without its parent panel or raw macro files on that server. Server-side data preparation is an alternative when needed; it requires the source panel and preparation inputs, and substantial preparation belongs on an allocated compute node.
 
@@ -216,7 +223,7 @@ Prepare each selected panel once on the main PC and transfer that same completed
 **Main PC — PowerShell:**
 
 ```powershell
-$transferDir = "D:\data_transfer"
+$transferDir = "E:\data_transfer"  # Main-PC staging folder; choose another local folder if needed.
 New-Item -ItemType Directory -Path $transferDir -Force | Out-Null
 
 # Choose the prepared panel being deployed; repeat for other required panels.
@@ -237,14 +244,28 @@ $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerI
 [IO.File]::WriteAllText("$archivePath.sha256", "$hash  $archiveName`n", [Text.Encoding]::ASCII)
 ```
 
-Upload the `.tar.gz` and `.sha256` files to Netdisk. On the campus PC, download both to `D:\data_transfer`. Transfer prepared panels when the server can directly reuse them; transfer raw inputs when server-side preparation requires them. To package raw inputs instead, set `$payload = "raw"` before creating the archive. Keep preparation inputs and finished panel archives clearly labeled. Changing a folder's name does not change the registered dataset identity in its metadata.
+For a direct upload, use the `.tar.gz` and `.sha256` files already on the main PC. For the intermediary route, upload both to Baidu Netdisk, create `D:\data_transfer` on the campus PC and download both files there. Transfer prepared panels when the server can directly reuse them; transfer raw inputs when server-side preparation requires them. To package raw inputs instead, set `$payload = "raw"` before creating the archive. Keep preparation inputs and finished panel archives clearly labeled. Changing a folder's name does not change the registered dataset identity in its metadata.
 
-### 4.2 Verify the archive on the campus PC
+### 4.2 Verify the archive on the uploading PC
 
-**Campus PC — PowerShell:**
+Select the folder on the PC doing the upload.
+
+**Campus PC for intermediary uploads — PowerShell:**
 
 ```powershell
 $transferDir = "D:\data_transfer"
+New-Item -ItemType Directory -Path $transferDir -Force | Out-Null
+```
+
+**Main PC for direct uploads — PowerShell, choose this block instead:**
+
+```powershell
+$transferDir = "E:\data_transfer"  # Use the archive's actual folder on the main PC.
+```
+
+**Selected uploading PC — PowerShell, check the archive:**
+
+```powershell
 $archiveName = "PASTE_INPUT_ARCHIVE_NAME.tar.gz"
 $archivePath = Join-Path $transferDir $archiveName
 
@@ -258,18 +279,18 @@ Write-Host "Archive SHA-256 verified."
 
 SHA-256 checks that the transferred archive matches the packaged file. Dataset and experiment checks after extraction provide the next layer of verification.
 
-### 4.3 Upload from the campus PC
+### 4.3 Upload from the selected PC
 
 Choose **one** server profile. The AI Hub address below is listed in its [official guide](https://github.com/CUHK-Business-School-AI-Hub/ai_hub_HPC_user_guide#direct-login-using-ssh-command); use your working saved connection if the address changes. SCRP access follows its [account/access guide](https://scrp.econ.cuhk.edu.hk/guide/account-and-access).
 
-**Campus PC — PowerShell, SCRP profile:**
+**Uploading PC — PowerShell, SCRP profile:**
 
 ```powershell
 $cluster = "s1155269217@scrp-login.econ.cuhk.edu.hk"
 $remoteData = "/data/users/s1155269217/GKX2020/data"
 ```
 
-**Campus PC — PowerShell, AI Hub profile:**
+**Uploading PC — PowerShell, AI Hub profile:**
 
 ```powershell
 $cluster = "tian.xu@137.189.75.110"
@@ -280,7 +301,7 @@ The remote data directory must exist. Run the upload block after selecting the p
 
 ```powershell
 @(
-    'lcd D:/data_transfer'
+    ('lcd "{0}"' -f $transferDir.Replace('\', '/'))
     "cd $remoteData"
     "put $archiveName"
     "put $archiveName.sha256"
@@ -288,7 +309,7 @@ The remote data directory must exist. Run the upload block after selecting the p
 ) | sftp -o ServerAliveInterval=30 -o ServerAliveCountMax=6 $cluster
 ```
 
-Enter authentication when prompted. Keep archives intact on the campus PC.
+Enter authentication when prompted. Keep archives intact on the uploading PC. `$transferDir` must contain the archive and checksum on that PC; creating a folder does not copy files into it.
 
 ### 4.4 Verify and extract on the target server
 
@@ -533,11 +554,13 @@ Keep the dataset identifier visible when recording these scores. A completed 176
 
 ## 9. Transfer results back and verify locally
 
-**SCRP / AI Hub → campus PC → Netdisk → main PC**
+**Direct: SCRP / AI Hub → main PC. Optional intermediary: SCRP / AI Hub → campus PC → Netdisk → main PC.**
 
-Create fresh archives after the final collection/repair. Earlier archives retain their earlier contents. Transfer whole archives between PCs; extract the model folders only when ready to verify and use them locally.
+Create fresh archives after the final collection/repair. Earlier archives retain their earlier contents. Follow the requested route; when recommending one, check the archive's actual size and connection reliability. For the campus route, download into `D:\data_transfer` on the campus PC, then use Baidu Netdisk to transfer the archive and checksum to the main PC. Keep both files together and verify the checksum on each receiving PC before extraction.
 
 ### 9.1 Package one complete experiment on its server
+
+Select only the experiment requested for analysis. A complete experiment means all files inside that one experiment folder, including fits, forecasts, settings, diagnostics and logs. Record its ID before packaging; repeat for additional experiments only when they are requested.
 
 **SCRP — Bash, choose this results root:**
 
@@ -564,38 +587,56 @@ archive="$run-results-$stamp.tar.gz"
 if tar -czf "$archive" -C "$results_root" "$run"; then
   sha256sum "$archive" > "$archive.sha256"
   sha256sum -c "$archive.sha256"
+  ls -lh "$archive" "$archive.sha256"
 fi
 ```
 
-Record the archive filename and export directory. Repeat for other completed experiments. For combined runs, include their entire `sources/` tree. Raw and prepared research datasets remain separate dependencies. Retain the exact dataset versions on the main PC for prediction restoration and later analyses that read predictors. Some analyses also need original audit/raw inputs, such as lagged size for the largest/smallest-stock groups. A result bundle does not embed those shared datasets. Different predictor specifications should retain their own result archives and experiment IDs.
+Record the archive filename, export directory and displayed size. For combined runs, include their entire `sources/` tree. Raw and prepared research datasets remain separate dependencies. Retain the exact dataset versions on the main PC for prediction restoration and later analyses that read predictors. Some analyses also need original audit/raw inputs, such as lagged size for the largest/smallest-stock groups. A result bundle does not embed those shared datasets. Different predictor specifications should retain their own result archives and experiment IDs.
 
-### 9.2 Download to the campus PC
+### 9.2 Download to the selected PC
 
-Choose the matching server/export profile.
+Choose the matching server/export profile. Run on the main PC for a direct download, or on the campus PC for the intermediary route.
 
-**Campus PC — PowerShell, SCRP:**
+**Downloading PC — PowerShell, SCRP:**
 
 ```powershell
 $cluster = "s1155269217@scrp-login.econ.cuhk.edu.hk"
 $remoteExport = "/data/users/s1155269217/GKX2020/results/experiments/transfer_archives"
 ```
 
-**Campus PC — PowerShell, AI Hub:**
+**Downloading PC — PowerShell, AI Hub:**
 
 ```powershell
 $cluster = "tian.xu@137.189.75.110"
 $remoteExport = "/hpchome/tian.xu/research-rep-gxk2020eapml/results/aihub_experiments/transfer_archives"
 ```
 
-**Campus PC — PowerShell, after selecting the profile:**
+Select the download folder on the PC receiving the archive.
+
+**Campus PC for the intermediary route — PowerShell:**
 
 ```powershell
 $transferDir = "D:\data_transfer"
+```
+
+**Main PC for a direct download — PowerShell, choose this block instead:**
+
+```powershell
+$transferDir = "E:\data_transfer"  # Choose a short local folder on the main PC.
+```
+
+**Downloading PC — PowerShell, prepare the folder and filename:**
+
+```powershell
 New-Item -ItemType Directory -Path $transferDir -Force | Out-Null
 $archiveName = "PASTE_RESULTS_ARCHIVE_NAME.tar.gz"
+```
 
+**Downloading PC — PowerShell, transfer the archive and checksum:**
+
+```powershell
 @(
-    'lcd D:/data_transfer'
+    ('lcd "{0}"' -f $transferDir.Replace('\', '/'))
     "cd $remoteExport"
     "get $archiveName"
     "get $archiveName.sha256"
@@ -603,17 +644,23 @@ $archiveName = "PASTE_RESULTS_ARCHIVE_NAME.tar.gz"
 ) | sftp -o ServerAliveInterval=30 -o ServerAliveCountMax=6 $cluster
 ```
 
-Verify the archive using the PowerShell checksum block in Section 4.2 with this results archive's filename. Upload both files to Netdisk using its desktop client.
+Verify the archive using the PowerShell checksum block in Section 4.2 with this results archive's filename and the receiving PC's `$transferDir`. For a direct download, proceed to Section 9.3 on the main PC using the same files and folder. For the intermediary route, upload both verified files from `D:\data_transfer` to Baidu Netdisk using its desktop client.
 
 ### 9.3 Download and extract on the main PC
 
-Download the same archive and `.sha256` file from Netdisk to `D:\data_transfer`. Repeat the archive checksum check from Section 4.2 on the main PC. Then extract to a new staging directory:
+For the intermediary route, create the main-PC transfer folder below, then download the same archive and `.sha256` file from Baidu Netdisk into it, keeping their filenames unchanged. For the direct route, use the files already downloaded there and retain their actual folder. Set the variables, repeat the archive checksum block from Section 4.2 on the main PC, and proceed to extraction only after it passes.
 
-**Main PC — PowerShell:**
+**Main PC — PowerShell, prepare the receiving folder and filename:**
 
 ```powershell
-$transferDir = "D:\data_transfer"
+$transferDir = "E:\data_transfer"  # Use the actual main-PC download folder.
+New-Item -ItemType Directory -Path $transferDir -Force | Out-Null
 $archiveName = "PASTE_RESULTS_ARCHIVE_NAME.tar.gz"
+```
+
+**Main PC — PowerShell, after downloading and passing the checksum check:**
+
+```powershell
 $extractDir = Join-Path $transferDir ("results_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
 New-Item -ItemType Directory -Path $extractDir -ErrorAction Stop | Out-Null
 

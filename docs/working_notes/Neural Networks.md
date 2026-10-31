@@ -52,6 +52,24 @@ mixed precision, monthly refitting, or warm starts are added. Adam's adaptive
 steps implement the optimizer described in the appendix; no extra decay schedule
 is inferred from the paper's phrase "learning rate shrinkage."
 
+## NN6-NN10 research extensions (2026-10-31)
+
+Phil approved deeper, wider pyramids extending the existing halving pattern. These are our research extensions; the paper specifies NN1-NN5. The original NN1-NN5 widths remain unchanged.
+
+| Model | Hidden-layer widths | Config |
+| --- | --- | --- |
+| NN6 | 64, 32, 16, 8, 4, 2 | `gkx_nn6_v1` |
+| NN7 | 128, 64, 32, 16, 8, 4, 2 | `gkx_nn7_v1` |
+| NN8 | 256, 128, 64, 32, 16, 8, 4, 2 | `gkx_nn8_v1` |
+| NN9 | 512, 256, 128, 64, 32, 16, 8, 4, 2 | `gkx_nn9_v1` |
+| NN10 | 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2 | `gkx_nn10_v1` |
+
+`core/models/nn_architectures.py` records all ten architectures and supplies model recognition to the launcher, annual preparation, dense dispatch, reports and saved-fit restoration. It has no PyTorch dependency. Importing `ARCHITECTURES` from `core.models.neural_network` remains supported. The new configs inherit `gkx_nn1_v1`; they change only the enabled model, config name and default output directory. Training remains mean half-squared error plus summed dense-kernel L1, with the same initialization, Adam settings, validation selection, ten-member ensemble, stopping, splits and numerical precision. There is no Huber-versus-MSE change between feature specifications.
+
+Depth and width both increase in these extensions, so their comparison does not isolate depth alone. The L1 sum is still unnormalized by parameter count; the same candidate grid can imply different effective regularization for larger networks. Review validation curves and selected penalties. This extension supplies no evidence yet that larger networks improve predictive performance. Keep the previous NN1-NN5 results and evaluate the extensions under the recorded research protocol.
+
+Use `run_experiment.py nn6` through `nn10` with the same `--dataset`, `--config`, `--local`/`--scrp`/`--aihub`, `status`, `resume` and `collect` interface. Complete saved fits support Figures 4/5 through the existing restoration path and NN prediction tolerances. The architecture module is included automatically in runtime source hashing. Adding these models changes execution fingerprints: prepare fresh experiment IDs and retain the original checkout/environment for historical resumes; reporting on saved results remains available.
+
 ## Exact loss and units
 
 For a training mini-batch B:

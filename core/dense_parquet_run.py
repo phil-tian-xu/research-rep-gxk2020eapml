@@ -7,6 +7,7 @@ from core.batch_run import _check_saved, rebuild_batch_reports
 from core.data_query.parquet_dataset import load_window
 from core.evaluation.prediction_metrics import zero_benchmark_r2
 from core.models.saved_fit import linear_state
+from core.models.nn_architectures import ARCHITECTURES
 from core.run import configured_loss, configured_specifications
 from core.run_state import read_checkpoints, resolve_run_dir, run_lock, save_checkpoint, validate_run
 
@@ -16,7 +17,7 @@ def run_parquet(panel, cfg, *, checkpoint_dir, stop_after_year=None, memory_snap
         from core.dense_ols_run import run_parquet as run_ols
         return run_ols(panel, cfg, checkpoint_dir=checkpoint_dir,
                        stop_after_year=stop_after_year, memory_snapshot=memory_snapshot)
-    if len(cfg.RUN.MODELS.ENABLED) == 1 and cfg.RUN.MODELS.ENABLED[0] in {"NN1", "NN2", "NN3", "NN4", "NN5"}:
+    if len(cfg.RUN.MODELS.ENABLED) == 1 and cfg.RUN.MODELS.ENABLED[0] in ARCHITECTURES:
         from core.nn_run import run_parquet as run_nn
         return run_nn(panel, cfg, checkpoint_dir=checkpoint_dir,
                       stop_after_year=stop_after_year, memory_snapshot=memory_snapshot)

@@ -97,10 +97,14 @@ class NeuralNetworkTests(unittest.TestCase):
 
     def test_signed_linear_output_and_invalid_options(self):
         from core.models.neural_network import ARCHITECTURES
-        for depth in range(1, 6):
+        self.assertEqual(set(ARCHITECTURES), {f"NN{depth}" for depth in range(1, 11)})
+        for depth in range(1, 11):
             model = ReturnNetwork(3, ARCHITECTURES[f"NN{depth}"]).eval()
             dense = [layer for layer in model.modules() if isinstance(layer, nn.Linear)]
-            self.assertEqual([layer.out_features for layer in dense], list((32, 16, 8, 4, 2)[:depth]) + [1])
+            expected = ((32, 16, 8, 4, 2)[:depth] if depth <= 5 else
+                        tuple(2**power for power in range(depth, 0, -1)))
+            self.assertEqual([layer.out_features for layer in dense], list(expected) + [1])
+            self.assertEqual(sum(isinstance(layer, nn.BatchNorm1d) for layer in model.modules()), depth)
             with torch.no_grad():
                 model.layers[-1].weight.zero_()
                 model.layers[-1].bias.fill_(-.01)
@@ -111,13 +115,18 @@ class NeuralNetworkTests(unittest.TestCase):
 
     @unittest.skipUnless(HAS_TORCH and torch.cuda.is_available() if HAS_TORCH else False, "CUDA unavailable")
     def test_cuda_training_and_cpu_restoration(self):
+        from core.models.nn_architectures import ARCHITECTURES
+
         rng = np.random.default_rng(9)
-        X = rng.normal(size=(80, 4)).astype(np.float32)
-        model = NeuralNetworkRegressor(seeds=(6,), device="cuda", batch_size=32, max_epochs=4).fit(
-            X[:64], X[:64, 0] * .1, X_validation=X[64:], y_validation=X[64:, 0] * .1)
-        restored = NeuralNetworkRegressor.from_state(model.export_state())
-        assert_allclose(model.predict(X), restored.predict(X), atol=1e-6, rtol=1e-5)
-        self.assertGreater(model.diagnostics_[0]["parameter_update_l2"], 0)
+        X = rng.normal(size=(80, 176)).astype(np.float32)
+        for name in ("NN1", "NN10"):
+            with self.subTest(model=name):
+                model = NeuralNetworkRegressor(hidden_sizes=ARCHITECTURES[name], seeds=(6,),
+                    device="cuda", batch_size=32, max_epochs=4).fit(
+                    X[:64], X[:64, 0] * .1, X_validation=X[64:], y_validation=X[64:, 0] * .1)
+                restored = NeuralNetworkRegressor.from_state(model.export_state())
+                assert_allclose(model.predict(X), restored.predict(X), atol=1e-6, rtol=1e-5)
+                self.assertGreater(model.diagnostics_[0]["parameter_update_l2"], 0)
 
 
 if __name__ == "__main__":
